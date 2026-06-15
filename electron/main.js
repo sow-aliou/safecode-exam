@@ -1,6 +1,7 @@
-import { app, BrowserWindow, globalShortcut } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { saveCodeToDb } from './db.js';
 
 // Pour gérer les modules ES dans Electron
 const __filename = fileURLToPath(import.meta.url);
@@ -38,6 +39,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Gérer la sauvegarde du code envoyée par le rendu (React)
+  ipcMain.handle('save-code', async (event, code) => {
+    try {
+      const result = await saveCodeToDb(code);
+      return { success: true };
+    } catch (error) {
+      console.error("Erreur IPC save-code:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   createWindow();
 
   app.on('activate', () => {

@@ -7,10 +7,10 @@ function App() {
 
   const handleCodeChange = (e) => {
     setCode(e.target.value);
-    // Simuler la sauvegarde locale continue (SQLite via IPC)
+    // Sauvegarde locale continue (SQLite via IPC)
     if (window.electronAPI) {
-      // window.electronAPI.saveCode(e.target.value);
-      console.log('Saved locally via IPC');
+      window.electronAPI.saveCode(e.target.value)
+        .catch(err => console.error("Erreur de sauvegarde:", err));
     }
   };
 
