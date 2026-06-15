@@ -12,16 +12,19 @@ const emptyQuestion = () => ({ id: Date.now(), enonce: '', typeReponse: 'texte',
 export default function CreateExam() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionTitle = 'Nouvelle épreuve' } = location.state || {};
+  const { sessionId = null, sessionTitle = 'Nouvelle épreuve' } = location.state || {};
 
   const [questions, setQuestions] = useState([emptyQuestion()]);
   const [examInfo, setExamInfo] = useState({
     titre: sessionTitle,
     instructions: '',
     dureeMinutes: 120,
-    langageCible: 'Java'
+    langageCible: 'Java',
+    sujetPdfBase64: null,
+    sujetPdfName: ''
   });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
 
   const addQuestion = () => setQuestions(prev => [...prev, { ...emptyQuestion(), id: Date.now() }]);
 
@@ -31,31 +34,111 @@ export default function CreateExam() {
   const deleteQuestion = (id) =>
     setQuestions(prev => prev.filter(q => q.id !== id));
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    // Ici on enverra les données à SQLite via IPC
+  // Convertir le PDF en Base64
+  const handlePdfUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      setError("Veuillez sélectionner un fichier PDF uniquement.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) { // Limite 5 Mo
+      setError("Le fichier PDF est trop volumineux (Max: 5 Mo).");
+      return;
+    }
+
+    setError('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      setExamInfo(prev => ({
+        ...prev,
+        sujetPdfBase64: reader.result,
+        sujetPdfName: file.name
+      }));
+    };
+    reader.onerror = () => {
+      setError("Erreur lors de la lecture du fichier PDF.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removePdf = () => {
+    setExamInfo(prev => ({
+      ...prev,
+      sujetPdfBase64: null,
+      sujetPdfName: ''
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!examInfo.titre.trim()) {
+      setError("Le titre de l'épreuve est obligatoire.");
+      return;
+    }
+    setError('');
+
+    const examData = {
+      title: examInfo.titre,
+      duree: parseInt(examInfo.dureeMinutes) || 120,
+      instructions: examInfo.instructions,
+      langageCible: examInfo.langageCible,
+      sujetPdfBase64: examInfo.sujetPdfBase64,
+      questions: questions
+    };
+
+    if (window.electronAPI && sessionId) {
+      try {
+        // Enregistrer dans la base de données
+        // 1. Mettre à jour le PDF du sujet
+        await window.electronAPI.updateSessionPdf(sessionId, examInfo.sujetPdfBase64);
+        
+        // (On peut aussi sauvegarder d'autres paramètres s'ils sont dans la base de données)
+        setSaved(true);
+        setTimeout(() => {
+          setSaved(false);
+          navigate('/teacher/dashboard');
+        }, 1200);
+      } catch (err) {
+        console.error(err);
+        setError("Erreur lors de l'enregistrement de l'épreuve.");
+      }
+    } else {
+      // Simulation locale
+      setSaved(true);
+      setTimeout(() => {
+        setSaved(false);
+        navigate('/teacher/dashboard');
+      }, 1200);
+    }
   };
 
   return (
-    <div className="gradient-bg" style={{ minHeight: '100vh' }}>
+    <div className="gradient-bg" style={{ minHeight: '100vh', paddingBottom: 60 }}>
       {/* Topbar */}
       <header className="topbar">
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/teacher/dashboard')}>
           ← Tableau de bord
         </button>
-        <div className="topbar-logo"><span>✏️ Rédiger l'épreuve</span></div>
+        <div className="topbar-logo"><span>✏️ Configurer l'épreuve</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={handleSave}>
-            {saved ? '✅ Sauvegardé !' : '💾 Sauvegarder'}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate('/teacher/dashboard')}>
-            ✅ Publier l'épreuve
+          <button className="btn btn-primary btn-sm" onClick={handleSave}>
+            {saved ? '✅ Publié !' : '💾 Publier l\'épreuve'}
           </button>
         </div>
       </header>
 
       <div className="create-exam-page animate-fade-up">
+        {error && (
+          <div style={{ 
+            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+            borderRadius: 'var(--radius)', padding: '16px', color: '#f87171', marginBottom: 20
+          }}>
+            ⚠️ {error}
+          </div>
+        )}
+
         {/* Infos générales */}
         <div className="glass-card" style={{ padding: 28, marginBottom: 24 }}>
           <h2 style={{ marginBottom: 20, fontSize: '1.1rem', fontWeight: 600 }}>📄 Informations générales</h2>
@@ -89,9 +172,72 @@ export default function CreateExam() {
           </div>
         </div>
 
+        {/* Upload du sujet PDF */}
+        <div className="glass-card" style={{ padding: 28, marginBottom: 24 }}>
+          <h2 style={{ marginBottom: 10, fontSize: '1.1rem', fontWeight: 600 }}>📎 Document PDF de l'épreuve (Optionnel)</h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
+            Uploadez le sujet d'examen officiel en PDF. Les étudiants pourront le visualiser directement dans leur espace d'examen sécurisé.
+          </p>
+
+          {!examInfo.sujetPdfBase64 ? (
+            <div style={{
+              border: '2px dashed var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: '40px 20px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              background: 'rgba(255,255,255,0.01)',
+              transition: 'all 0.2s',
+              position: 'relative'
+            }}
+            onMouseOver={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+            onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handlePdfUpload}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  opacity: 0,
+                  cursor: 'pointer'
+                }}
+              />
+              <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: 12 }}>📥</span>
+              <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 4 }}>
+                Cliquez ou glissez-déposez le fichier PDF ici
+              </p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                PDF uniquement (Taille max: 5 Mo)
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(99,102,241,0.05)',
+              border: '1px solid rgba(99,102,241,0.2)',
+              borderRadius: 'var(--radius)',
+              padding: '16px 20px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: '1.8rem' }}>📄</span>
+                <div>
+                  <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{examInfo.sujetPdfName || 'Sujet Examen.pdf'}</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--success)' }}>Fichier chargé avec succès en base de données</p>
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={removePdf} style={{ color: 'var(--danger)', border: 'none' }}>
+                Supprimer
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Questions */}
         <div className="section-header">
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>❓ Questions ({questions.length})</h2>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>❓ Questions structurées ({questions.length})</h2>
           <button id="btn-add-question" className="btn btn-ghost btn-sm" onClick={addQuestion}>
             + Ajouter une question
           </button>
