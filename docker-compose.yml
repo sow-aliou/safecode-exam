@@ -6,6 +6,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - /tmp/.X11-unix:/tmp/.X11-unix
     ports:
       - "5173:5173"
     environment:

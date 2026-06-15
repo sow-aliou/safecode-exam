@@ -30,4 +30,4 @@ COPY . .
 EXPOSE 5173
 
 # Commande par défaut pour lancer l'environnement de développement
-CMD ["npm", "run", "dev"]
+CMD ["npm", "run", "dev:app"]

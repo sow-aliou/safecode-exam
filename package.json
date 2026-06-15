@@ -9,13 +9,15 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "wait-on tcp:5173 && electron .",
+    "electron": "wait-on tcp:5173 && electron . --no-sandbox",
     "dev:app": "concurrently -k \"npm run dev\" \"npm run electron\"",
     "build:app": "npm run build && electron-builder"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-router-dom": "^7.17.0",
     "sqlite3": "^6.0.1"
   },
   "devDependencies": {
