@@ -1,11 +1,13 @@
-FROM node:20
+FROM node:22-slim
 
 WORKDIR /server
 
+# Copier les fichiers de dépendances et installer
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
+# Copier tout le code du serveur
 COPY . .
 
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

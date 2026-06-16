@@ -1,34 +1,31 @@
-version: '3.8'
-
 services:
+  # ===== SERVICE 1: Backend Node.js/Express + SQLite =====
   backend:
-    build: ./server
+    build:
+      context: ./server
+      dockerfile: Dockerfile
     container_name: safecode_backend
     volumes:
-      - ./server:/server
-      - /server/node_modules
+      # Persistance de la base de données uniquement (flag :z requis sur Fedora avec SELinux/Podman)
+      - ./server/server_database.db:/server/server_database.db:z
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - PORT=3000
-    restart: always
+    restart: unless-stopped
 
-  app:
-    build: .
-    container_name: safecode_app
+  # ===== SERVICE 2: Frontend Vite (React) =====
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: safecode_frontend
     depends_on:
       - backend
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /tmp/.X11-unix:/tmp/.X11-unix
     ports:
       - "5173:5173"
     environment:
       - NODE_ENV=development
-      - DISPLAY=$DISPLAY
-      - XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR
-    network_mode: host
-    privileged: true
-    ipc: host
+      - VITE_API_URL=http://localhost:3000
+    restart: unless-stopped
