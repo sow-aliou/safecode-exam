@@ -105,12 +105,25 @@ export default function CreateExam() {
         setError("Erreur lors de l'enregistrement de l'épreuve.");
       }
     } else {
-      // Simulation locale
-      setSaved(true);
-      setTimeout(() => {
-        setSaved(false);
-        navigate('/teacher/dashboard');
-      }, 1200);
+      try {
+        if (sessionId) {
+          const response = await fetch(`http://localhost:3000/api/sessions/${sessionId}/pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pdfBase64: examInfo.sujetPdfBase64 })
+          });
+          const data = await response.json();
+          if (!data.success) throw new Error(data.error);
+        }
+        setSaved(true);
+        setTimeout(() => {
+          setSaved(false);
+          navigate('/teacher/dashboard');
+        }, 1200);
+      } catch (err) {
+        console.error(err);
+        setError("Impossible d'enregistrer le PDF sur le serveur central.");
+      }
     }
   };
 

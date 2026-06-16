@@ -14,13 +14,30 @@ export default function TeacherAuth() {
     e.preventDefault();
     if (!form.email || !form.motDePasse) { setError("Champs obligatoires manquants."); return; }
     setLoading(true); setError('');
-    // Simulation (à relier au backend/SQLite)
-    setTimeout(() => {
+    
+    const endpoint = tab === 'login' ? '/api/teacher/login' : '/api/teacher/register';
+    try {
+      const response = await fetch(`http://localhost:3000${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const data = await response.json();
       setLoading(false);
-      sessionStorage.setItem('teacher_email', form.email);
-      sessionStorage.setItem('teacher_name', form.nom || 'Enseignant');
-      navigate('/teacher/dashboard');
-    }, 800);
+      if (data.success) {
+        const teacher = data.teacher || form;
+        sessionStorage.setItem('teacher_email', teacher.email);
+        sessionStorage.setItem('teacher_name', `${teacher.prenom || ''} ${teacher.nom || ''}`.trim() || 'Enseignant');
+        sessionStorage.setItem('teacher_id', teacher.id || data.teacherId);
+        navigate('/teacher/dashboard');
+      } else {
+        setError(data.error || "Une erreur est survenue lors de l'authentification.");
+      }
+    } catch (err) {
+      setLoading(false);
+      setError("Impossible de contacter le serveur central. Assurez-vous que le backend est démarré.");
+      console.error(err);
+    }
   };
 
   return (

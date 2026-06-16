@@ -27,34 +27,33 @@ export default function TeacherDashboard() {
 
   // Charger les sessions depuis la base de données
   const fetchSessions = async () => {
-    if (window.electronAPI) {
-      try {
+    try {
+      let sessionsList = [];
+      if (window.electronAPI) {
         const response = await window.electronAPI.getSessions();
-        if (response.success) {
-          // Mapper les statuts
-          const now = new Date();
-          const mapped = response.sessions.map(s => {
-            let status = 'pending';
-            // On peut rajouter une logique de statut selon la date si besoin
-            return {
-              ...s,
-              status
-            };
-          });
-          setSessions(mapped);
-        }
-      } catch (err) {
-        console.error("Erreur de chargement des sessions:", err);
+        if (response.success) sessionsList = response.sessions;
+      } else {
+        const response = await fetch('http://localhost:3000/api/sessions');
+        const data = await response.json();
+        if (data.success) sessionsList = data.sessions;
       }
-    } else {
-      // Fallback Demo
-      setSessions([
-        {
-          id: 1, code: 'XK9-2A4', title: 'Programmation Java – LP3',
-          date: '2025-06-20', heureDebut: '08:00', heureFin: '11:00',
-          status: 'pending', submissionsCount: 0, totalStudents: 24
-        }
-      ]);
+      
+      const mapped = sessionsList.map(s => ({
+        ...s,
+        status: 'pending'
+      }));
+      setSessions(mapped);
+    } catch (err) {
+      console.error("Erreur de chargement des sessions:", err);
+      if (!window.electronAPI) {
+        setSessions([
+          {
+            id: 1, code: 'XK9-2A4', title: 'Programmation Java – LP3 (Démo Local)',
+            date: '2025-06-20', heureDebut: '08:00', heureFin: '11:00',
+            status: 'pending', submissionsCount: 0, totalStudents: 24
+          }
+        ]);
+      }
     }
   };
 
@@ -108,19 +107,24 @@ export default function TeacherDashboard() {
         setError("Erreur SQLite.");
       }
     } else {
-      // Simulation locale
-      setSessions(prev => [{
-        id: Date.now(),
-        code: newSession.code,
-        title: newSession.title,
-        date: newSession.date,
-        heureDebut: newSession.heureDebut,
-        heureFin: newSession.heureFin,
-        status: 'pending',
-        submissionsCount: 0,
-        totalStudents: 0
-      }, ...prev]);
-      setShowNewModal(false);
+      try {
+        const response = await fetch('http://localhost:3000/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sessionData)
+        });
+        const data = await response.json();
+        if (data.success) {
+          setSuccess("Session d'examen créée avec succès !");
+          setShowNewModal(false);
+          fetchSessions();
+        } else {
+          setError(data.error || "Erreur serveur.");
+        }
+      } catch (err) {
+        console.error(err);
+        setError("Serveur de démo centralisé hors-ligne.");
+      }
     }
   };
 
@@ -193,6 +197,16 @@ export default function TeacherDashboard() {
       } catch (err) {
         console.error(err);
       }
+    } else {
+      try {
+        const response = await fetch(`http://localhost:3000/api/sessions/${session.id}/students`);
+        const data = await response.json();
+        if (data.success && data.students.length > 0) {
+          setImportedStudents(data.students.map(s => ({ ...s, statusEmail: 'Envoyé' })));
+        }
+      } catch (err) {
+        console.error(err);
+      }
     }
   };
 
@@ -206,16 +220,24 @@ export default function TeacherDashboard() {
     setIsSendingEmails(true);
     setEmailStatusMessage("Enregistrement des étudiants en base de données...");
 
-    // 1. Enregistrer dans SQLite
-    if (window.electronAPI && selectedSession) {
-      try {
+    // 1. Enregistrer dans la base de données
+    try {
+      if (window.electronAPI && selectedSession) {
         await window.electronAPI.importStudents(selectedSession.id, importedStudents);
-      } catch (err) {
-        console.error(err);
-        setError("Erreur de sauvegarde des étudiants.");
-        setIsSendingEmails(false);
-        return;
+      } else if (selectedSession) {
+        const response = await fetch(`http://localhost:3000/api/sessions/${selectedSession.id}/students`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ students: importedStudents })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
       }
+    } catch (err) {
+      console.error(err);
+      setError("Erreur d'enregistrement des étudiants.");
+      setIsSendingEmails(false);
+      return;
     }
 
     // 2. Simuler l'envoi d'emails individuels avec une animation fluide

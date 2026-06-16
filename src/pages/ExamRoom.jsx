@@ -97,15 +97,40 @@ export default function ExamRoom() {
           .then(() => setLastSaved(new Date()))
           .catch(console.error);
       } else {
-        setLastSaved(new Date());
+        // Mode navigateur direct : synchro avec le serveur central
+        fetch('http://localhost:3000/api/copies/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ copieId: parseInt(copieId), answers: updated })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) setLastSaved(new Date());
+          })
+          .catch(err => {
+            console.warn("Serveur central hors-ligne, sauvegarde uniquement en mémoire.");
+            setLastSaved(new Date());
+          });
       }
       
       return updated;
     });
   }, [question, copieId]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setShowSubmitModal(false);
+    
+    // Tenter de notifier le serveur central de la validation de la copie
+    try {
+      await fetch(`http://localhost:3000/api/copies/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ copieId: parseInt(copieId) })
+      });
+    } catch (err) {
+      console.error("Erreur de soumission au serveur central:", err);
+    }
+
     sessionStorage.clear();
     navigate('/');
   };

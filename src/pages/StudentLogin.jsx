@@ -49,19 +49,40 @@ export default function StudentLogin() {
         console.error(err);
       }
     } else {
-      // Simulation pour le navigateur web
-      setTimeout(() => {
+      try {
+        const response = await fetch('http://localhost:3000/api/student/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            matricule: matricule.trim().toUpperCase(),
+            sessionCode: examCode.trim().toUpperCase(),
+            password: personalCode.trim()
+          })
+        });
+        const data = await response.json();
         setLoading(false);
-        if (matricule.toUpperCase() === 'DEV_001' && examCode === '1234' && personalCode === 'PASS123') {
-          sessionStorage.setItem('student_matricule', 'DEV_001');
-          sessionStorage.setItem('student_name', 'Etudiant Test');
-          sessionStorage.setItem('session_code', '1234');
-          sessionStorage.setItem('copie_id', '1');
-          navigate(`/exam/1234`);
+        if (data.success && data.user) {
+          const user = data.user;
+          sessionStorage.setItem('student_matricule', user.matricule);
+          sessionStorage.setItem('student_name', `${user.prenom} ${user.nom}`);
+          sessionStorage.setItem('session_code', examCode.trim().toUpperCase());
+          sessionStorage.setItem('copie_id', user.copieId);
+          sessionStorage.setItem('exam_data', JSON.stringify({
+            titre: user.titre,
+            dureeMinutes: user.dureeMinutes,
+            instructions: user.instructions,
+            langageCible: user.langageCible,
+            sujetPdfBase64: user.sujetPdfBase64
+          }));
+          navigate(`/exam/${examCode.trim().toUpperCase()}`);
         } else {
-          setError("Identifiants de test : Matricule: DEV_001, Session: 1234, Code: PASS123");
+          setError(data.error || "Identifiants incorrects ou session introuvable.");
         }
-      }, 800);
+      } catch (err) {
+        setLoading(false);
+        setError("Erreur de connexion au serveur central.");
+        console.error(err);
+      }
     }
   };
 

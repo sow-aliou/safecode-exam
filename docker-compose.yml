@@ -1,8 +1,24 @@
 version: '3.8'
 
 services:
+  backend:
+    build: ./server
+    container_name: safecode_backend
+    volumes:
+      - ./server:/server
+      - /server/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+    restart: always
+
   app:
     build: .
+    container_name: safecode_app
+    depends_on:
+      - backend
     volumes:
       - .:/app
       - /app/node_modules
@@ -11,11 +27,8 @@ services:
       - "5173:5173"
     environment:
       - NODE_ENV=development
-      # Ces variables d'environnement sont nécessaires pour passer l'interface graphique (X11) d'Electron via Docker sur Linux
       - DISPLAY=$DISPLAY
       - XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR
     network_mode: host
-    # Pour autoriser l'accès au serveur X (GUI)
     privileged: true
-    # On ajoute ipc: host pour Chromium (Electron)
     ipc: host
