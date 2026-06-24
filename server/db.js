@@ -40,6 +40,7 @@ function initServerDb() {
         langageCible TEXT,
         dureeMinutes INTEGER,
         sujetPdfBase64 TEXT,
+        enonceTexte TEXT,
         FOREIGN KEY (enseignant_id) REFERENCES Utilisateur(id)
       )
     `);
@@ -66,11 +67,19 @@ function initServerDb() {
         fluxUML TEXT,
         estValidee BOOLEAN DEFAULT 0,
         horodatageDerniereModif DATETIME DEFAULT CURRENT_TIMESTAMP,
+        notesJSON TEXT DEFAULT '{}',
+        noteFinale REAL DEFAULT 0,
+        commentaire TEXT DEFAULT '',
         FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id),
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id),
         UNIQUE(etudiant_id, session_id)
       )
-    `);
+    `, () => {
+      // Pour les bases de données existantes, ajouter les colonnes si elles manquent
+      db.run("ALTER TABLE Copie ADD COLUMN notesJSON TEXT DEFAULT '{}'", (err) => {});
+      db.run("ALTER TABLE Copie ADD COLUMN noteFinale REAL DEFAULT 0", (err) => {});
+      db.run("ALTER TABLE Copie ADD COLUMN commentaire TEXT DEFAULT ''", (err) => {});
+    });
 
     // 5. Table JournalLog
     db.run(`
@@ -84,6 +93,17 @@ function initServerDb() {
         criticite TEXT,
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id),
         FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id)
+      )
+    `);
+
+    // 6. Table BanqueQuestions
+    db.run(`
+      CREATE TABLE IF NOT EXISTS BanqueQuestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enseignant_id INTEGER,
+        enonce TEXT,
+        typeReponse TEXT,
+        points INTEGER
       )
     `);
   });

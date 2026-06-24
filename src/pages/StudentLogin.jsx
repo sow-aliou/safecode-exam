@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from '../utils/lang';
 
 export default function StudentLogin() {
   const navigate = useNavigate();
+  const { t, lang, setLanguage } = useTranslation();
   const [examCode, setExamCode] = useState('');
   const [matricule, setMatricule] = useState('');
   const [personalCode, setPersonalCode] = useState('');
@@ -12,11 +14,27 @@ export default function StudentLogin() {
   const handleJoin = async (e) => {
     e.preventDefault();
     if (!examCode.trim() || !matricule.trim() || !personalCode.trim()) {
-      setError("Veuillez remplir tous les champs.");
+      setError(t('fieldsRequired'));
       return;
     }
     setLoading(true);
     setError('');
+
+    const storeSession = (user) => {
+      sessionStorage.setItem('student_matricule', user.matricule);
+      sessionStorage.setItem('student_name', `${user.prenom} ${user.nom}`);
+      sessionStorage.setItem('session_code', examCode.trim().toUpperCase());
+      sessionStorage.setItem('copie_id', user.copieId);
+      sessionStorage.setItem('exam_data', JSON.stringify({
+        titre: user.titre,
+        dureeMinutes: user.dureeMinutes,
+        instructions: user.instructions,
+        langageCible: user.langageCible,
+        sujetPdfBase64: user.sujetPdfBase64,
+        enonceTexte: user.enonceTexte || null
+      }));
+      navigate(`/exam/${examCode.trim().toUpperCase()}`);
+    };
 
     if (window.electronAPI) {
       try {
@@ -27,25 +45,13 @@ export default function StudentLogin() {
         );
         setLoading(false);
         if (response.success && response.user) {
-          const user = response.user;
-          sessionStorage.setItem('student_matricule', user.matricule);
-          sessionStorage.setItem('student_name', `${user.prenom} ${user.nom}`);
-          sessionStorage.setItem('session_code', examCode.trim().toUpperCase());
-          sessionStorage.setItem('copie_id', user.copieId);
-          sessionStorage.setItem('exam_data', JSON.stringify({
-            titre: user.titre,
-            dureeMinutes: user.dureeMinutes,
-            instructions: user.instructions,
-            langageCible: user.langageCible,
-            sujetPdfBase64: user.sujetPdfBase64
-          }));
-          navigate(`/exam/${examCode.trim().toUpperCase()}`);
+          storeSession(response.user);
         } else {
-          setError("Identifiants incorrects ou session introuvable.");
+          setError(t('authError'));
         }
       } catch (err) {
         setLoading(false);
-        setError("Erreur lors de la connexion à la base de données.");
+        setError(t('authError'));
         console.error(err);
       }
     } else {
@@ -62,25 +68,13 @@ export default function StudentLogin() {
         const data = await response.json();
         setLoading(false);
         if (data.success && data.user) {
-          const user = data.user;
-          sessionStorage.setItem('student_matricule', user.matricule);
-          sessionStorage.setItem('student_name', `${user.prenom} ${user.nom}`);
-          sessionStorage.setItem('session_code', examCode.trim().toUpperCase());
-          sessionStorage.setItem('copie_id', user.copieId);
-          sessionStorage.setItem('exam_data', JSON.stringify({
-            titre: user.titre,
-            dureeMinutes: user.dureeMinutes,
-            instructions: user.instructions,
-            langageCible: user.langageCible,
-            sujetPdfBase64: user.sujetPdfBase64
-          }));
-          navigate(`/exam/${examCode.trim().toUpperCase()}`);
+          storeSession(data.user);
         } else {
-          setError(data.error || "Identifiants incorrects ou session introuvable.");
+          setError(data.error || t('authError'));
         }
       } catch (err) {
         setLoading(false);
-        setError("Erreur de connexion au serveur central.");
+        setError(t('authError'));
         console.error(err);
       }
     }
@@ -89,21 +83,27 @@ export default function StudentLogin() {
   return (
     <div className="gradient-bg auth-page">
       <button className="back-btn" onClick={() => navigate('/')}>
-        ← Retour
+        ← {t('back')}
       </button>
+
+      {/* Sélecteur de langue */}
+      <div style={{ position: 'fixed', top: 20, right: 24, display: 'flex', gap: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 4, border: '1px solid var(--border)', zIndex: 50 }}>
+        <button onClick={() => setLanguage('fr')} style={{ background: lang === 'fr' ? 'var(--accent)' : 'transparent', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>FR</button>
+        <button onClick={() => setLanguage('en')} style={{ background: lang === 'en' ? 'var(--accent)' : 'transparent', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>EN</button>
+      </div>
 
       <div className="glass-card auth-card animate-fade-up">
         <div className="auth-header">
           <div className="auth-icon" style={{ background: 'rgba(6,182,212,0.15)', color: '#67e8f9' }}>
             🎓
           </div>
-          <h2>Accès Sécurisé Étudiant</h2>
-          <p>Entrez vos identifiants uniques reçus par email</p>
+          <h2>{t('studentTitle')}</h2>
+          <p>{t('studentDesc')}</p>
         </div>
 
         <form className="auth-form" onSubmit={handleJoin}>
           <div className="form-group">
-            <label className="form-label">Numéro de Matricule</label>
+            <label className="form-label">{t('matriculeLabel')}</label>
             <input
               id="matricule"
               className="form-input"
@@ -116,7 +116,7 @@ export default function StudentLogin() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Code de la Session d'Examen</label>
+            <label className="form-label">{t('examCodeLabel')}</label>
             <input
               id="exam-code"
               className="form-input"
@@ -135,7 +135,7 @@ export default function StudentLogin() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Code d'Accès Personnel (Email)</label>
+            <label className="form-label">{t('personalCodeLabel')}</label>
             <input
               id="personal-code"
               className="form-input"
@@ -143,10 +143,7 @@ export default function StudentLogin() {
               placeholder="••••••••"
               value={personalCode}
               onChange={e => setPersonalCode(e.target.value)}
-              style={{ 
-                textAlign: 'center',
-                letterSpacing: '0.1em'
-              }}
+              style={{ textAlign: 'center', letterSpacing: '0.1em' }}
             />
           </div>
 
@@ -156,19 +153,28 @@ export default function StudentLogin() {
               borderRadius: 'var(--radius)', padding: '12px', fontSize: '0.875rem', color: '#f87171',
               textAlign: 'center', lineHeight: '1.4'
             }}>
-              {error}
+              ⚠️ {error}
             </div>
           )}
 
           <button id="btn-join-exam" className="btn btn-primary btn-block btn-lg" type="submit" disabled={loading}>
-            {loading ? '⏳ Vérification...' : '🚀 Lancer l\'Examen'}
+            {loading ? `⏳ ${t('verifying')}` : `🚀 ${t('launchBtn')}`}
           </button>
         </form>
 
         <p className="text-center text-muted text-sm mt-4">
-          Vos accès individuels ont été envoyés sur votre email universitaire.
-          <br />En cas d'absence d'email, contactez votre enseignant.
+          {t('studentHelpText')}
         </p>
+
+        {/* Séparateur */}
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16, textAlign: 'center' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            💡 {lang === 'fr' ? 'Mode démo :' : 'Demo mode:'}{' '}
+            <span style={{ fontFamily: 'Fira Code', color: 'var(--accent-light)', fontSize: '0.75rem' }}>
+              DEV_001 / 1234 / PASS123
+            </span>
+          </p>
+        </div>
       </div>
     </div>
   );

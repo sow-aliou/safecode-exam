@@ -5,10 +5,15 @@ import {
   saveCodeToDb, 
   getSessionsFromDb, 
   createSessionInDb, 
-  updateSessionPdfInDb, 
+  updateSessionExamInDb, 
   importStudentsToDb, 
   getStudentsForSessionFromDb, 
-  studentLoginCheck 
+  studentLoginCheck,
+  getQuestionBankFromDb,
+  addQuestionToBankInDb,
+  deleteQuestionFromBankInDb,
+  getResultsForSessionFromDb,
+  saveGradeToDb
 } from './db.js';
 
 // Pour gérer les modules ES dans Electron
@@ -74,11 +79,12 @@ app.whenReady().then(() => {
   });
 
   // Récupérer toutes les sessions d'examen (Serveur -> local)
-  ipcMain.handle('get-sessions', async () => {
+  ipcMain.handle('get-sessions', async (event, teacherId) => {
     try {
       // Essayer de charger depuis le serveur central
       try {
-        const response = await fetch(`${BACKEND_URL}/api/sessions`);
+        const url = teacherId ? `${BACKEND_URL}/api/sessions?teacherId=${teacherId}` : `${BACKEND_URL}/api/sessions`;
+        const response = await fetch(url);
         const data = await response.json();
         if (data.success) {
           // Facultatif : on pourrait synchroniser les sessions reçues dans la base locale SQLite
@@ -89,7 +95,7 @@ app.whenReady().then(() => {
       }
 
       // Fallback local
-      const localResult = await getSessionsFromDb();
+      const localResult = await getSessionsFromDb(teacherId);
       return { success: true, sessions: localResult };
     } catch (error) {
       console.error("Erreur get-sessions:", error);
@@ -130,25 +136,25 @@ app.whenReady().then(() => {
     }
   });
 
-  // Mettre à jour le sujet PDF (Serveur + local)
-  ipcMain.handle('update-session-pdf', async (event, sessionId, pdfBase64) => {
+  // Mettre à jour l'examen complet (Serveur + local)
+  ipcMain.handle('update-session-exam', async (event, sessionId, examData) => {
     try {
       // 1. Envoyer au serveur central
       try {
-        await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/pdf`, {
+        await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/exam`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pdfBase64 })
+          body: JSON.stringify(examData)
         });
       } catch (err) {
-        console.log("Erreur connexion serveur pour PDF.");
+        console.log("Erreur connexion serveur pour l'examen.");
       }
 
       // 2. Mettre à jour localement
-      await updateSessionPdfInDb(sessionId, pdfBase64);
+      await updateSessionExamInDb(sessionId, examData);
       return { success: true };
     } catch (error) {
-      console.error("Erreur update-session-pdf:", error);
+      console.error("Erreur update-session-exam:", error);
       return { success: false, error: error.message };
     }
   });
@@ -243,6 +249,98 @@ app.whenReady().then(() => {
       }
     } catch (error) {
       console.error("Erreur student-login:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ================= BANQUE DE QUESTIONS =================
+  ipcMain.handle('get-question-bank', async (event, teacherId) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/questionbank?teacherId=${teacherId}`);
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        console.log("Serveur injoignable, banque de questions locale.");
+      }
+      const localResult = await getQuestionBankFromDb(teacherId);
+      return { success: true, questions: localResult };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('add-question-bank', async (event, teacherId, question) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/questionbank`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teacherId, ...question })
+        });
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        console.log("Serveur injoignable, ajout de question local.");
+      }
+      const localResult = await addQuestionToBankInDb(teacherId, question);
+      return localResult;
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('delete-question-bank', async (event, questionId) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/questionbank/${questionId}`, {
+          method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        console.log("Serveur injoignable, suppression de question locale.");
+      }
+      const localResult = await deleteQuestionFromBankInDb(questionId);
+      return localResult;
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ================= CORRECTIONS & RESULTATS =================
+  ipcMain.handle('get-session-results', async (event, sessionId) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/results`);
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        console.log("Serveur injoignable, résultats locaux.");
+      }
+      const localResult = await getResultsForSessionFromDb(sessionId);
+      return { success: true, results: localResult };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('save-grade', async (event, copieId, notesJSON, noteFinale, commentaire) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/copies/${copieId}/grade`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notesJSON, noteFinale, commentaire })
+        });
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        console.log("Serveur injoignable, correction locale.");
+      }
+      const localResult = await saveGradeToDb(copieId, notesJSON, noteFinale, commentaire);
+      return localResult;
+    } catch (error) {
       return { success: false, error: error.message };
     }
   });

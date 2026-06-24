@@ -1,17 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { useTranslation } from '../utils/lang';
 
-const statusLabels = {
-  pending: { label: 'À venir', cls: 'badge-blue' },
-  active:  { label: 'En cours', cls: 'badge-green' },
-  closed:  { label: 'Terminé', cls: 'badge-yellow' },
-};
+// Calcule le statut d'une session à partir de sa date + durée
+function computeStatus(dateStr, dureeMinutes) {
+  if (!dateStr) return 'pending';
+  const start = new Date(dateStr);
+  const end = new Date(start.getTime() + (dureeMinutes || 120) * 60000);
+  const now = new Date();
+  if (now < start) return 'pending';
+  if (now >= start && now <= end) return 'active';
+  return 'closed';
+}
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
+  const { t, lang, setLanguage } = useTranslation();
   const teacherName = sessionStorage.getItem('teacher_name') || 'Enseignant';
-  
+
+  // Navigation tab state
+  const [activeTab, setActiveTab] = useState('sessions'); // 'sessions' | 'qbank' | 'results'
+
+  // Sessions Tab States
   const [sessions, setSessions] = useState([]);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showStudentsModal, setShowStudentsModal] = useState(false);
@@ -20,27 +31,42 @@ export default function TeacherDashboard() {
   const [newSession, setNewSession] = useState({ title: '', date: '', heureDebut: '', heureFin: '', code: '' });
   const [importedStudents, setImportedStudents] = useState([]);
   const [isSendingEmails, setIsSendingEmails] = useState(false);
-  const [emailProgress, setEmailProgress] = useState([]);
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Question Bank Tab States
+  const [qBankQuestions, setQBankQuestions] = useState([]);
+  const [showQBankModal, setShowQBankModal] = useState(false);
+  const [newQBankQuestion, setNewQBankQuestion] = useState({ enonce: '', typeReponse: 'texte', points: 1 });
+
+  // Results & Grading Tab States
+  const [selectedResultSession, setSelectedResultSession] = useState('');
+  const [sessionResults, setSessionResults] = useState([]);
+  const [showGradingModal, setShowGradingModal] = useState(false);
+  const [activeCopie, setActiveCopie] = useState(null);
+  const [currentGrades, setCurrentGrades] = useState({}); // { qId: score }
+  const [currentComment, setCurrentComment] = useState('');
 
   // Charger les sessions depuis la base de données
   const fetchSessions = async () => {
     try {
       let sessionsList = [];
+      const tId = sessionStorage.getItem('teacher_id');
       if (window.electronAPI) {
-        const response = await window.electronAPI.getSessions();
+        const response = await window.electronAPI.getSessions(tId);
         if (response.success) sessionsList = response.sessions;
       } else {
-        const response = await fetch('http://localhost:3000/api/sessions');
+        const url = tId ? `http://localhost:3000/api/sessions?teacherId=${tId}` : 'http://localhost:3000/api/sessions';
+        const response = await fetch(url);
         const data = await response.json();
         if (data.success) sessionsList = data.sessions;
       }
       
       const mapped = sessionsList.map(s => ({
         ...s,
-        status: 'pending'
+        status: computeStatus(s.date, s.duree)
       }));
       setSessions(mapped);
     } catch (err) {
@@ -49,16 +75,84 @@ export default function TeacherDashboard() {
         setSessions([
           {
             id: 1, code: 'XK9-2A4', title: 'Programmation Java – LP3 (Démo Local)',
-            date: '2025-06-20', heureDebut: '08:00', heureFin: '11:00',
-            status: 'pending', submissionsCount: 0, totalStudents: 24
+            date: '2025-06-20 08:00', duree: 180,
+            status: 'pending', submissionsCount: 0, totalStudents: 24,
+            enonceTexte: JSON.stringify([
+              { id: 1, enonce: "Qu'est-ce que le polymorphisme en Java ?", typeReponse: 'texte', points: 5 },
+              { id: 2, enonce: "Écrire une fonction récursive qui calcule le factoriel d'un entier.", typeReponse: 'code', points: 7 },
+              { id: 3, enonce: "Dessiner le diagramme de classes pour un système de gestion de bibliothèque.", typeReponse: 'uml', points: 8 }
+            ])
           }
         ]);
       }
     }
   };
 
+  // Charger la banque de questions
+  const fetchQBank = async () => {
+    const teacherId = sessionStorage.getItem('teacher_id') || 1;
+    try {
+      if (window.electronAPI) {
+        const res = await window.electronAPI.getQuestionBank(teacherId);
+        if (res.success) setQBankQuestions(res.questions);
+      } else {
+        const res = await fetch(`http://localhost:3000/api/questionbank?teacherId=${teacherId}`);
+        const data = await res.json();
+        if (data.success) setQBankQuestions(data.questions);
+      }
+    } catch (err) {
+      console.error("Erreur de chargement de la banque de questions:", err);
+      // Mode démo locale
+      setQBankQuestions([
+        { id: 1, enonce: "Définir la différence entre une interface et une classe abstraite.", typeReponse: 'texte', points: 4 },
+        { id: 2, enonce: "Implémenter l'algorithme du Tri Rapide (QuickSort) en Java.", typeReponse: 'code', points: 8 }
+      ]);
+    }
+  };
+
+  // Charger les résultats pour la session sélectionnée
+  const fetchSessionResults = async (sessionId) => {
+    if (!sessionId) {
+      setSessionResults([]);
+      return;
+    }
+    try {
+      if (window.electronAPI) {
+        const res = await window.electronAPI.getSessionResults(sessionId);
+        if (res.success) setSessionResults(res.results);
+      } else {
+        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/results`);
+        const data = await res.json();
+        if (data.success) setSessionResults(data.results);
+      }
+    } catch (err) {
+      console.error("Erreur de chargement des résultats:", err);
+      // Mode démo locale
+      setSessionResults([
+        {
+          studentId: 101, matricule: "ETU-2024-001", nom: "Diallo", prenom: "Mariama", email: "m.diallo@uidt.sn",
+          copieId: 50, contenuCode: JSON.stringify({
+            "1": "Le polymorphisme est la capacité d'un objet à prendre plusieurs formes. Par exemple, une référence de classe mère peut pointer vers un objet enfant.",
+            "2": "public int factorielle(int n) {\n  if (n <= 1) return 1;\n  return n * factorielle(n - 1);\n}",
+            "3": "Class Bibliotheque {\n  - nom : String\n}\n\nBibliotheque --[0..*]--> Livre"
+          }),
+          fluxUML: "", estValidee: 1, notesJSON: "{}", noteFinale: null, commentaire: "", horodatageDerniereModif: "2026-06-17T12:00:00Z"
+        },
+        {
+          studentId: 102, matricule: "ETU-2024-002", nom: "Sow", prenom: "Ibrahima", email: "i.sow@uidt.sn",
+          copieId: 51, contenuCode: JSON.stringify({
+            "1": "C'est quand on surcharge les méthodes.",
+            "2": "public int fact(int n) { return n * fact(n-1); }"
+          }),
+          fluxUML: "", estValidee: 0, notesJSON: "{}", noteFinale: null, commentaire: "", horodatageDerniereModif: "2026-06-17T11:45:00Z"
+        }
+      ]);
+    }
+  };
+
   useEffect(() => {
     fetchSessions();
+    fetchQBank();
   }, []);
 
   const handleLogout = () => { sessionStorage.clear(); navigate('/'); };
@@ -68,7 +162,7 @@ export default function TeacherDashboard() {
     return [3,3].map(n => Array.from({length:n},()=>chars[Math.floor(Math.random()*chars.length)]).join('')).join('-');
   };
 
-  // Ouvrir le modal nouvelle session avec un code généré
+  // Ouvrir le modal nouvelle session
   const handleOpenNewSessionModal = () => {
     setNewSession({
       title: '',
@@ -84,23 +178,29 @@ export default function TeacherDashboard() {
     e.preventDefault();
     setError('');
 
+    // Calculer la durée en minutes entre début et fin
+    const startParts = newSession.heureDebut.split(':').map(Number);
+    const endParts = newSession.heureFin.split(':').map(Number);
+    const durMin = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
+
     const sessionData = {
       title: newSession.title,
       date: `${newSession.date} ${newSession.heureDebut}`,
       code: newSession.code,
-      duree: 120, // Par défaut
-      instructions: 'Veuillez composer seul et sans sortir du mode Kiosque.'
+      duree: durMin > 0 ? durMin : 120,
+      instructions: 'Veuillez composer seul et sans sortir du mode Kiosque.',
+      teacherId: sessionStorage.getItem('teacher_id')
     };
 
     if (window.electronAPI) {
       try {
         const result = await window.electronAPI.createSession(sessionData);
         if (result.success) {
-          setSuccess("Session d'examen créée avec succès !");
+          setSuccess(t('success'));
           setShowNewModal(false);
           fetchSessions();
         } else {
-          setError(result.error || "Impossible de créer la session.");
+          setError(result.error || "Erreur de création.");
         }
       } catch (err) {
         console.error(err);
@@ -115,7 +215,7 @@ export default function TeacherDashboard() {
         });
         const data = await response.json();
         if (data.success) {
-          setSuccess("Session d'examen créée avec succès !");
+          setSuccess(t('success'));
           setShowNewModal(false);
           fetchSessions();
         } else {
@@ -123,7 +223,7 @@ export default function TeacherDashboard() {
         }
       } catch (err) {
         console.error(err);
-        setError("Serveur de démo centralisé hors-ligne.");
+        setError("Serveur hors-ligne.");
       }
     }
   };
@@ -143,15 +243,12 @@ export default function TeacherDashboard() {
         const worksheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(worksheet);
 
-        // Standardiser et ajouter des codes uniques secrets d'authentification
         const students = json.map(row => {
-          // Chercher les clés insensibles à la casse
           const matriculeKey = Object.keys(row).find(k => k.toLowerCase().includes('matricule')) || 'matricule';
           const nomKey = Object.keys(row).find(k => k.toLowerCase().includes('nom')) || 'nom';
           const prenomKey = Object.keys(row).find(k => k.toLowerCase().includes('prenom') || k.toLowerCase().includes('prénom')) || 'prenom';
           const emailKey = Object.keys(row).find(k => k.toLowerCase().includes('mail') || k.toLowerCase().includes('email')) || 'email';
 
-          // Générer un mot de passe unique à 8 caractères pour chaque étudiant
           const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
           const uniquePass = Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 
@@ -166,20 +263,20 @@ export default function TeacherDashboard() {
         }).filter(s => s.matricule && s.email);
 
         if (students.length === 0) {
-          setError("Aucun étudiant valide trouvé dans le fichier. Assurez-vous d'avoir les colonnes matricule et email.");
+          setError("Aucun étudiant valide. Le fichier doit avoir les colonnes matricule et email.");
         } else {
           setImportedStudents(students);
-          setSuccess(`${students.length} étudiants importés du fichier.`);
+          setSuccess(`${students.length} étudiants importés.`);
         }
       } catch (err) {
         console.error(evt, err);
-        setError("Erreur lors de la lecture du fichier. Veuillez utiliser un format Excel (.xlsx) ou CSV valide.");
+        setError("Erreur de format de fichier.");
       }
     };
     reader.readAsArrayBuffer(file);
   };
 
-  // Charger les étudiants inscrits à la session sélectionnée
+  // Ouvrir la gestion des étudiants
   const handleOpenStudentsModal = async (session) => {
     setSelectedSession(session);
     setImportedStudents([]);
@@ -210,17 +307,16 @@ export default function TeacherDashboard() {
     }
   };
 
-  // Simuler l'envoi d'emails avec animation
+  // Simuler l'envoi d'emails
   const handleGenerateAndSendEmails = async () => {
     if (importedStudents.length === 0) {
-      setError("Importez d'abord la liste des étudiants.");
+      setError(t('stepImportHelp'));
       return;
     }
 
     setIsSendingEmails(true);
-    setEmailStatusMessage("Enregistrement des étudiants en base de données...");
+    setEmailStatusMessage(t('savingStudents'));
 
-    // 1. Enregistrer dans la base de données
     try {
       if (window.electronAPI && selectedSession) {
         await window.electronAPI.importStudents(selectedSession.id, importedStudents);
@@ -235,195 +331,560 @@ export default function TeacherDashboard() {
       }
     } catch (err) {
       console.error(err);
-      setError("Erreur d'enregistrement des étudiants.");
+      setError("Erreur SQL.");
       setIsSendingEmails(false);
       return;
     }
 
-    // 2. Simuler l'envoi d'emails individuels avec une animation fluide
     const progressList = [...importedStudents];
     for (let i = 0; i < progressList.length; i++) {
       progressList[i] = { ...progressList[i], statusEmail: 'En cours...' };
       setImportedStudents([...progressList]);
-      setEmailStatusMessage(`Envoi de l'email d'accès à ${progressList[i].email}...`);
+      setEmailStatusMessage(`${t('sendingTo')} ${progressList[i].email}...`);
 
-      // Délai pour simuler l'animation d'envoi d'email
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       progressList[i] = { ...progressList[i], statusEmail: 'Envoyé ✅' };
       setImportedStudents([...progressList]);
     }
 
     setIsSendingEmails(false);
-    setEmailStatusMessage(`Succès ! ${progressList.length} emails avec identifiants uniques envoyés.`);
+    setEmailStatusMessage(`${progressList.length} ${t('emailSuccess')}`);
     fetchSessions();
+  };
+
+  // Question Bank handlers
+  const handleSaveQBankQuestion = async (e) => {
+    e.preventDefault();
+    if (!newQBankQuestion.enonce.trim()) return;
+    const teacherId = sessionStorage.getItem('teacher_id') || 1;
+
+    try {
+      if (window.electronAPI) {
+        const res = await window.electronAPI.addQuestionBank(teacherId, newQBankQuestion);
+        if (res.success) {
+          fetchQBank();
+          setShowQBankModal(false);
+          setNewQBankQuestion({ enonce: '', typeReponse: 'texte', points: 1 });
+        }
+      } else {
+        const res = await fetch('http://localhost:3000/api/questionbank', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teacherId, ...newQBankQuestion })
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchQBank();
+          setShowQBankModal(false);
+          setNewQBankQuestion({ enonce: '', typeReponse: 'texte', points: 1 });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteQBankQuestion = async (id) => {
+    if (!confirm(t('qbankDeleteConfirm'))) return;
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.deleteQuestionBank(id);
+      } else {
+        await fetch(`http://localhost:3000/api/questionbank/${id}`, { method: 'DELETE' });
+      }
+      fetchQBank();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Results / Grading handlers
+  const handleOpenGradingModal = (copie) => {
+    setActiveCopie(copie);
+    let parsedNotes = {};
+    try {
+      parsedNotes = JSON.parse(copie.notesJSON || '{}');
+    } catch (_) {
+      parsedNotes = {};
+    }
+    
+    // Si aucune note n'est enregistrée, initialiser à 0 pour chaque question
+    const currentSessionObj = sessions.find(s => s.id === Number(selectedResultSession));
+    let examQs = [];
+    if (currentSessionObj && currentSessionObj.enonceTexte) {
+      try { examQs = JSON.parse(currentSessionObj.enonceTexte); } catch (_) {}
+    }
+    
+    const initialNotes = {};
+    examQs.forEach(q => {
+      initialNotes[q.id] = parsedNotes[q.id] !== undefined ? parsedNotes[q.id] : 0;
+    });
+
+    setCurrentGrades(initialNotes);
+    setCurrentComment(copie.commentaire || '');
+    setShowGradingModal(true);
+  };
+
+  const handleUpdateQuestionGrade = (qId, value) => {
+    setCurrentGrades(prev => ({ ...prev, [qId]: Number(value) }));
+  };
+
+  const handleSaveGrading = async () => {
+    if (!activeCopie) return;
+    const finalScore = Object.values(currentGrades).reduce((acc, pts) => acc + Number(pts), 0);
+    try {
+      if (window.electronAPI) {
+        const res = await window.electronAPI.saveGrade(activeCopie.copieId, currentGrades, finalScore, currentComment);
+        if (res.success) {
+          setSuccess(t('gradingSaved'));
+          setShowGradingModal(false);
+          fetchSessionResults(selectedResultSession);
+        }
+      } else {
+        const res = await fetch(`http://localhost:3000/api/copies/${activeCopie.copieId}/grade`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notesJSON: currentGrades, noteFinale: finalScore, commentaire: currentComment })
+        });
+        const data = await response.json();
+        if (data.success) {
+          setSuccess(t('gradingSaved'));
+          setShowGradingModal(false);
+          fetchSessionResults(selectedResultSession);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      // SQLite local ou démo fallback
+      const updated = sessionResults.map(r => r.copieId === activeCopie.copieId ? { ...r, notesJSON: JSON.stringify(currentGrades), noteFinale: finalScore, commentaire: currentComment } : r);
+      setSessionResults(updated);
+      setSuccess(t('gradingSaved'));
+      setShowGradingModal(false);
+    }
+  };
+
+  const handleExportResults = () => {
+    if (sessionResults.length === 0) return;
+    const currentSessionObj = sessions.find(s => s.id === Number(selectedResultSession));
+    const examTitle = currentSessionObj ? currentSessionObj.title : 'Examen';
+
+    const formattedData = sessionResults.map(res => {
+      return {
+        [t('resultsTableMatricule')]: res.matricule,
+        [t('resultsTableStudent')]: `${res.prenom} ${res.nom}`,
+        [t('tableEmail')]: res.email,
+        [t('resultsTableStatus')]: res.estValidee ? t('resultsStatusSubmitted') : t('resultsStatusFinishedTime'),
+        [t('resultsTableGrade')]: res.noteFinale !== null ? res.noteFinale : 'Non corrigé',
+        [t('gradingCommentLabel')]: res.commentaire || ''
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(formattedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Notes");
+    XLSX.writeFile(workbook, `Notes_${examTitle.replace(/\s+/g, '_')}.xlsx`);
   };
 
   const initials = teacherName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
 
   return (
     <div className="gradient-bg dashboard">
-      {/* Topbar */}
+      {/* Navbar supérieure */}
       <header className="topbar">
         <div className="topbar-logo">
           <span>🛡️</span>
-          <span>SAFECODE-EXAM – Enseignant</span>
+          <span>SAFECODE-EXAM</span>
         </div>
-        <div className="topbar-user">
-          <span>Prof. {teacherName}</span>
-          <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--teacher-color), #6d28d9)' }}>
-            {initials}
+        
+        {/* Liens de navigation */}
+        <nav className="topbar-nav">
+          <a href="#" className={`nav-link ${activeTab === 'sessions' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('sessions'); }}>
+            {t('tabSessions')}
+          </a>
+          <a href="#" className={`nav-link ${activeTab === 'qbank' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('qbank'); }}>
+            {t('tabQuestionBank')}
+          </a>
+          <a href="#" className={`nav-link ${activeTab === 'results' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('results'); }}>
+            {t('tabResults')}
+          </a>
+        </nav>
+
+        {/* Sélecteur de langue et Profil */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* Langue toggle */}
+          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: 3, border: '1px solid var(--border)' }}>
+            <button 
+              onClick={() => setLanguage('fr')} 
+              style={{
+                background: lang === 'fr' ? 'var(--accent)' : 'transparent',
+                color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600
+              }}>
+              FR
+            </button>
+            <button 
+              onClick={() => setLanguage('en')} 
+              style={{
+                background: lang === 'en' ? 'var(--accent)' : 'transparent',
+                color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 6, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600
+              }}>
+              EN
+            </button>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Déconnexion</button>
+
+          <div className="topbar-user">
+            <span>Prof. {teacherName}</span>
+            <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--teacher-color), #6d28d9)' }}>
+              {initials}
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={handleLogout} style={{ marginLeft: 8 }}>
+              {t('logout')}
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="dashboard-content">
-        {success && (
-          <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 'var(--radius)', padding: '12px', color: '#34d399', marginBottom: 20 }}>
-            {success}
+        {loading && (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            <span className="spin" style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⏳</span>
+            {' '}{t('loading')}
           </div>
         )}
         {error && (
           <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius)', padding: '12px', color: '#f87171', marginBottom: 20 }}>
-            {error}
+            ⚠️ {error}
+          </div>
+        )}
+        {success && (
+          <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 'var(--radius)', padding: '12px', color: '#34d399', marginBottom: 20 }}>
+            ✅ {success}
           </div>
         )}
 
-        {/* En-tête */}
-        <div className="page-header animate-fade-up">
-          <h1>Tableau de bord 👋</h1>
-          <p>Bienvenue, Prof. {teacherName} — Administration des examens sécurisés</p>
-        </div>
-
-        {/* Stats */}
-        <div className="stats-grid animate-fade-up">
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--accent-light)' }}>{sessions.length}</div>
-            <div className="stat-label">Sessions d'examen</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--success)' }}>
-              {sessions.filter(s => s.status === 'active').length}
+        {/* ─── TAB SESSIONS ────────────────────────────────────────────────── */}
+        {activeTab === 'sessions' && (
+          <div className="animate-fade-up">
+            <div className="page-header">
+              <h1>{t('dashboardTitle')} 👋</h1>
+              <p>Prof. {teacherName} — {t('adminSubtitle')}</p>
             </div>
-            <div className="stat-label">Examens actifs</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--student-color)' }}>
-              {importedStudents.length}
-            </div>
-            <div className="stat-label">Étudiants inscrits</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: '#f87171' }}>0</div>
-            <div className="stat-label">Tentatives de fraude</div>
-          </div>
-        </div>
 
-        {/* Sessions */}
-        <div className="animate-fade-up">
-          <div className="section-header">
-            <h2>📋 Sessions d'examen configurées</h2>
-            <button id="btn-new-session" className="btn btn-primary btn-sm" onClick={handleOpenNewSessionModal}>
-              + Nouvelle session
-            </button>
-          </div>
-
-          {sessions.length === 0 ? (
-            <div className="glass-card empty-state">
-              <div className="empty-icon">📋</div>
-              <p>Aucune session pour l'instant.<br />Créez votre première session d'examen.</p>
+            {/* Stats */}
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--accent-light)' }}>{sessions.length}</div>
+                <div className="stat-label">{t('statSessions')}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--success)' }}>
+                  {sessions.filter(s => s.status === 'active').length}
+                </div>
+                <div className="stat-label">{t('statActive')}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--warning)' }}>
+                  {sessions.filter(s => s.status === 'closed').length}
+                </div>
+                <div className="stat-label">{t('statClosed')}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: '#f87171' }}>0</div>
+                <div className="stat-label">{t('statFraud')}</div>
+              </div>
             </div>
-          ) : (
-            <div className="sessions-list">
-              {sessions.map(session => (
-                <div key={session.id} className="glass-card session-card">
-                  <div className="session-info">
-                    <h3>{session.title}</h3>
-                    <div className="session-meta">
-                      <span>📅 {session.date}</span>
-                      <span>⏱ {session.duree || 120} min</span>
-                      <div className="exam-code-display" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '2px 10px', marginLeft: 8 }}>
-                        <span style={{ fontFamily: 'Fira Code', fontWeight: 700, color: 'var(--accent-light)', letterSpacing: '0.15em', fontSize: '0.85rem' }}>
-                          {session.code}
+
+            <div className="section-header">
+              <h2>📋 {t('configuredSessions')}</h2>
+              <button id="btn-new-session" className="btn btn-primary btn-sm" onClick={handleOpenNewSessionModal}>
+                {t('newSessionBtn')}
+              </button>
+            </div>
+
+            {sessions.length === 0 ? (
+              <div className="glass-card empty-state">
+                <div className="empty-icon">📋</div>
+                <p>{t('noSessions')}</p>
+              </div>
+            ) : (
+              <div className="sessions-list">
+                {sessions.map(session => {
+                  return (
+                    <div key={session.id} className="glass-card session-card">
+                      <div className={`session-card-accent ${session.status}`} />
+                      <div className="session-card-body">
+                        <div className="session-info">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+                            <h3 style={{ margin: 0 }}>
+                              {session.title}
+                              <span className={`badge ${
+                                session.status === 'active' ? 'badge-green' : session.status === 'closed' ? 'badge-yellow' : 'badge-blue'
+                              }`} style={{ marginLeft: 8 }}>
+                                {session.status === 'active' ? t('statusActive') : session.status === 'closed' ? t('statusClosed') : t('statusPending')}
+                              </span>
+                            </h3>
+                            <div className="session-code-badge" title={t('sessionCodeTooltip')}>
+                              {session.code}
+                            </div>
+                          </div>
+
+                          <div className="session-meta">
+                            <span className="session-meta-item">
+                              📅 {session.date ? new Date(session.date).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </span>
+                            <span className="session-meta-item">⏱ {session.duree || 120} min</span>
+                            <span className="session-meta-item">👥 {session.totalStudents || 0} {t('studentsBtn').toLowerCase()}</span>
+                            
+                            {session.enonceTexte && (() => {
+                              try { return JSON.parse(session.enonceTexte).length > 0; } catch { return false; }
+                            })() && (
+                              <span className="session-meta-item" style={{ borderColor: 'rgba(99,102,241,0.3)', color: 'var(--accent-light)' }}>
+                                ❓ {(() => { try { return JSON.parse(session.enonceTexte).length; } catch { return 0; }})()} {t('qbankQuestionLabel').toLowerCase()}(s)
+                              </span>
+                            )}
+                            {session.sujetPdfBase64 && (
+                              <span className="session-meta-item" style={{ borderColor: 'rgba(16,185,129,0.3)', color: 'var(--success)' }}>
+                                📎 PDF
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="session-actions">
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title } })}
+                          >
+                            ✏️ {t('examBtn')}
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => handleOpenStudentsModal(session)}
+                            style={{ background: 'rgba(6,182,212,0.1)', color: 'var(--student-color)', border: '1px solid rgba(6,182,212,0.25)' }}
+                          >
+                            👥 {t('studentsBtn')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── TAB BANQUE DE QUESTIONS ────────────────────────────────────── */}
+        {activeTab === 'qbank' && (
+          <div className="animate-fade-up">
+            <div className="page-header">
+              <h1>📂 {t('qbankTitle')}</h1>
+              <p>{t('qbankDesc')}</p>
+            </div>
+
+            <div className="section-header">
+              <h2>❓ {t('qbankTitle')}</h2>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowQBankModal(true)}>
+                {t('qbankAddBtn')}
+              </button>
+            </div>
+
+            {qBankQuestions.length === 0 ? (
+              <div className="glass-card empty-state">
+                <div className="empty-icon">❓</div>
+                <p>{t('qbankNoQuestions')}</p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+                {qBankQuestions.map(q => (
+                  <div key={q.id} className="glass-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <span className={`badge ${
+                          q.typeReponse === 'code' ? 'badge-green' : q.typeReponse === 'uml' ? 'badge-blue' : 'badge-yellow'
+                        }`}>
+                          {q.typeReponse === 'code' ? t('qbankTypeCode') : q.typeReponse === 'uml' ? t('qbankTypeUml') : t('qbankTypeTexte')}
+                        </span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--accent-light)' }}>
+                          {q.points} pt{q.points > 1 ? 's' : ''}
                         </span>
                       </div>
-                      {session.sujetPdfBase64 && (
-                        <span style={{ color: 'var(--success)' }}>✅ Sujet PDF attaché</span>
-                      )}
+                      <p style={{ fontSize: '0.95rem', color: 'var(--text-primary)', marginBottom: 20, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                        {q.enonce}
+                      </p>
+                    </div>
+                    <div style={{ textAlign: 'right', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }}
+                        onClick={() => handleDeleteQBankQuestion(q.id)}>
+                        ✕ {t('close')}
+                      </button>
                     </div>
                   </div>
-                  <div className="session-actions" style={{ display: 'flex', gap: 10 }}>
-                    <button 
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title } })}
-                    >
-                      ✏️ Configurer l'épreuve & PDF
-                    </button>
-                    <button 
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleOpenStudentsModal(session)}
-                      style={{ color: 'var(--student-color)', borderColor: 'rgba(6,182,212,0.3)' }}
-                    >
-                      👥 Gérer les étudiants
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── TAB CORRECTIONS & RESULTATS ───────────────────────────────── */}
+        {activeTab === 'results' && (
+          <div className="animate-fade-up">
+            <div className="page-header">
+              <h1>📊 {t('resultsTitle')}</h1>
+              <p>{t('resultsDesc')}</p>
             </div>
-          )}
-        </div>
+
+            <div className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
+              <label className="form-label">{t('resultsSelectSession')}</label>
+              <select className="form-select" style={{ marginTop: 8 }}
+                value={selectedResultSession} onChange={e => {
+                  setSelectedResultSession(e.target.value);
+                  fetchSessionResults(e.target.value);
+                }}>
+                <option value="">-- {t('resultsSelectSession').replace(':', '')} --</option>
+                {sessions.map(s => (
+                  <option key={s.id} value={s.id}>{s.title} ({s.code})</option>
+                ))}
+              </select>
+            </div>
+
+            {!selectedResultSession ? (
+              <div className="glass-card empty-state">
+                <div className="empty-icon">📊</div>
+                <p>{t('resultsNoSelectedSession')}</p>
+              </div>
+            ) : (
+              <div className="glass-card" style={{ padding: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+                  <h3 style={{ margin: 0 }}>👥 Candidats ({sessionResults.length})</h3>
+                  <button className="btn btn-ghost btn-sm" onClick={handleExportResults} disabled={sessionResults.length === 0}>
+                    {t('resultsExportBtn')}
+                  </button>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                        <th style={{ padding: 12, textAlign: 'left' }}>{t('resultsTableMatricule')}</th>
+                        <th style={{ padding: 12, textAlign: 'left' }}>{t('resultsTableStudent')}</th>
+                        <th style={{ padding: 12, textAlign: 'left' }}>{t('resultsTableStatus')}</th>
+                        <th style={{ padding: 12, textAlign: 'left' }}>{t('resultsTableDate')}</th>
+                        <th style={{ padding: 12, textAlign: 'center' }}>{t('resultsTableGrade')}</th>
+                        <th style={{ padding: 12, textAlign: 'right' }}>{t('resultsTableActions')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sessionResults.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                            {t('noStudents')}
+                          </td>
+                        </tr>
+                      ) : (
+                        sessionResults.map(res => {
+                          const currentSessionObj = sessions.find(s => s.id === Number(selectedResultSession));
+                          const isClosed = currentSessionObj ? currentSessionObj.status === 'closed' : false;
+                          const isViewable = res.estValidee === 1 || isClosed;
+                          
+                          return (
+                            <tr key={res.copieId} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: 12, fontWeight: 'bold' }}>{res.matricule}</td>
+                              <td style={{ padding: 12 }}>{res.prenom} {res.nom}</td>
+                              <td style={{ padding: 12 }}>
+                                {res.estValidee === 1 ? (
+                                  <span style={{ color: 'var(--success)' }}>{t('resultsStatusSubmitted')}</span>
+                                ) : isClosed ? (
+                                  <span style={{ color: 'var(--warning)' }}>{t('resultsStatusFinishedTime')}</span>
+                                ) : (
+                                  <span style={{ color: 'var(--accent-light)' }}>{t('resultsStatusInProgress')}</span>
+                                )}
+                              </td>
+                              <td style={{ padding: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                                {res.horodatageDerniereModif ? new Date(res.horodatageDerniereModif).toLocaleString() : '—'}
+                              </td>
+                              <td style={{ padding: 12, textAlign: 'center', fontWeight: 'bold', color: 'var(--accent-light)' }}>
+                                {res.noteFinale !== null ? `${res.noteFinale} pts` : '—'}
+                              </td>
+                              <td style={{ padding: 12, textAlign: 'right' }}>
+                                <button className="btn btn-ghost btn-sm"
+                                  style={{
+                                    color: isViewable ? 'var(--accent-light)' : 'var(--text-muted)',
+                                    borderColor: isViewable ? 'rgba(99,102,241,0.2)' : 'transparent',
+                                    cursor: isViewable ? 'pointer' : 'not-allowed'
+                                  }}
+                                  onClick={() => {
+                                    if (!isViewable) {
+                                      alert(t('resultsLockWarning'));
+                                      return;
+                                    }
+                                    handleOpenGradingModal(res);
+                                  }}>
+                                  {t('resultsActionCorrect')}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Modal nouvelle session */}
+      {/* ─── MODAL NOUVELLE SESSION ────────────────────────────────────── */}
       {showNewModal && (
         <div className="modal-overlay" onClick={() => setShowNewModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>📋 Nouvelle Session d'Examen</h2>
-            <p>Saisissez les informations de base. Le code d'accès sera partagé aux étudiants.</p>
+            <h2>📋 {t('newSessionTitle')}</h2>
+            <p>{t('newSessionDesc')}</p>
             <form onSubmit={handleCreateSession} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div className="form-group">
-                <label className="form-label">Titre de la Session</label>
+                <label className="form-label">{t('sessionTitleLabel')}</label>
                 <input className="form-input" placeholder="ex: Examen Final Java - S6" required
                   value={newSession.title} onChange={e => setNewSession({...newSession, title: e.target.value})} />
               </div>
               <div className="form-group">
-                <label className="form-label">Date</label>
+                <label className="form-label">{t('dateLabel')}</label>
                 <input className="form-input" type="date" required
                   value={newSession.date} onChange={e => setNewSession({...newSession, date: e.target.value})} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Heure de début</label>
+                  <label className="form-label">{t('startTimeLabel')}</label>
                   <input className="form-input" type="time" required
                     value={newSession.heureDebut} onChange={e => setNewSession({...newSession, heureDebut: e.target.value})} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Heure de fin</label>
+                  <label className="form-label">{t('endTimeLabel')}</label>
                   <input className="form-input" type="time" required
                     value={newSession.heureFin} onChange={e => setNewSession({...newSession, heureFin: e.target.value})} />
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">Code Session d'Examen (Généré)</label>
+                <label className="form-label">{t('sessionCodeLabel')}</label>
                 <input className="form-input" readOnly value={newSession.code} 
                   style={{ fontFamily: 'Fira Code', textAlign: 'center', letterSpacing: '0.15em', fontWeight: 'bold' }} />
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowNewModal(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary">✨ Créer</button>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowNewModal(false)}>{t('cancel')}</button>
+                <button type="submit" className="btn btn-primary">✨ {t('createBtn')}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal gestion des étudiants */}
+      {/* ─── MODAL GESTION DES ETUDIANTS ────────────────────────────────── */}
       {showStudentsModal && selectedSession && (
         <div className="modal-overlay" onClick={() => setShowStudentsModal(false)}>
           <div className="modal" style={{ maxWidth: '800px', width: '90%' }} onClick={e => e.stopPropagation()}>
-            <h2>👥 Session : {selectedSession.title}</h2>
-            <p>Importez votre classe et envoyez à chaque étudiant son code d'authentification personnel.</p>
+            <h2>👥 {t('studentsModalTitle')}{selectedSession.title}</h2>
+            <p>{t('studentsModalDesc')}</p>
             
             <div style={{ 
               display: 'grid', 
@@ -436,7 +897,7 @@ export default function TeacherDashboard() {
               marginBottom: 16
             }}>
               <div>
-                <label className="form-label">📥 Étape 1 : Importer Excel / CSV</label>
+                <label className="form-label">{t('stepImport')}</label>
                 <input 
                   type="file" 
                   accept=".xlsx, .xls, .csv" 
@@ -444,18 +905,18 @@ export default function TeacherDashboard() {
                   style={{ marginTop: 8, fontSize: '0.85rem' }}
                 />
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  Le fichier doit contenir les colonnes : <strong>matricule</strong>, <strong>nom</strong>, <strong>prenom</strong>, <strong>email</strong>.
+                  {t('stepImportHelp')}
                 </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <label className="form-label">📧 Étape 2 : Distribuer les accès</label>
+                <label className="form-label">{t('stepEmail')}</label>
                 <button 
                   className="btn btn-primary btn-block" 
                   onClick={handleGenerateAndSendEmails}
                   disabled={importedStudents.length === 0 || isSendingEmails}
                   style={{ marginTop: 8 }}
                 >
-                  {isSendingEmails ? '⏳ Envoi en cours...' : '🔐 Générer & Envoyer par mail'}
+                  {isSendingEmails ? `⏳ ${t('sendingEmails')}` : `🔐 ${t('sendEmailsBtn')}`}
                 </button>
               </div>
             </div>
@@ -482,18 +943,18 @@ export default function TeacherDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ background: 'rgba(255,255,255,0.04)', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ padding: 10, textAlign: 'left' }}>Matricule</th>
-                    <th style={{ padding: 10, textAlign: 'left' }}>Nom & Prénom</th>
-                    <th style={{ padding: 10, textAlign: 'left' }}>Email</th>
-                    <th style={{ padding: 10, textAlign: 'center' }}>Code Secret</th>
-                    <th style={{ padding: 10, textAlign: 'right' }}>Statut Mail</th>
+                    <th style={{ padding: 10, textAlign: 'left' }}>{t('tableMatricule')}</th>
+                    <th style={{ padding: 10, textAlign: 'left' }}>{t('tableFullName')}</th>
+                    <th style={{ padding: 10, textAlign: 'left' }}>{t('tableEmail')}</th>
+                    <th style={{ padding: 10, textAlign: 'center' }}>{t('tableSecretCode')}</th>
+                    <th style={{ padding: 10, textAlign: 'right' }}>{t('tableEmailStatus')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {importedStudents.length === 0 ? (
                     <tr>
                       <td colSpan="5" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
-                        Aucun étudiant importé pour cette session.
+                        {t('noStudents')}
                       </td>
                     </tr>
                   ) : (
@@ -520,12 +981,129 @@ export default function TeacherDashboard() {
 
             <div className="modal-actions" style={{ marginTop: 16 }}>
               <button className="btn btn-ghost" onClick={() => setShowStudentsModal(false)} disabled={isSendingEmails}>
-                Fermer
+                {t('close')}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ─── MODAL NOUVELLE QUESTION BANQUE ────────────────────────────── */}
+      {showQBankModal && (
+        <div className="modal-overlay" onClick={() => setShowQBankModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>❓ {t('qbankAddBtn')}</h2>
+            <p>{t('qbankStatementPlaceholder')}</p>
+            <form onSubmit={handleSaveQBankQuestion} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">{t('qbankStatementPlaceholder')}</label>
+                <textarea className="form-textarea" required rows={4}
+                  value={newQBankQuestion.enonce} onChange={e => setNewQBankQuestion({...newQBankQuestion, enonce: e.target.value})} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">{t('qbankTypeLabel')}</label>
+                  <select className="form-select" value={newQBankQuestion.typeReponse}
+                    onChange={e => setNewQBankQuestion({...newQBankQuestion, typeReponse: e.target.value})}>
+                    <option value="texte">{t('qbankTypeTexte')}</option>
+                    <option value="code">{t('qbankTypeCode')}</option>
+                    <option value="uml">{t('qbankTypeUml')}</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('qbankPointsLabel')}</label>
+                  <input className="form-input" type="number" min="1" required
+                    value={newQBankQuestion.points} onChange={e => setNewQBankQuestion({...newQBankQuestion, points: Number(e.target.value)})} />
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowQBankModal(false)}>{t('cancel')}</button>
+                <button type="submit" className="btn btn-primary">✨ {t('save')}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── MODAL CORRECTION / GRADING ───────────────────────────────── */}
+      {showGradingModal && activeCopie && (() => {
+        const currentSessionObj = sessions.find(s => s.id === Number(selectedResultSession));
+        const examQs = currentSessionObj && currentSessionObj.enonceTexte ? JSON.parse(currentSessionObj.enonceTexte) : [];
+        
+        let studentAnswers = {};
+        try {
+          studentAnswers = JSON.parse(activeCopie.contenuCode || '{}');
+        } catch (e) {
+          studentAnswers = {};
+        }
+        
+        return (
+          <div className="modal-overlay" onClick={() => setShowGradingModal(false)}>
+            <div className="modal" style={{ maxWidth: '900px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+              <h2>{t('gradingTitle')}{activeCopie.prenom} {activeCopie.nom}</h2>
+              <p style={{ marginBottom: 12 }}>Matricule: {activeCopie.matricule} • {t('gradingCopieStatus')}: {activeCopie.estValidee ? 'Validée' : 'Temps écoulé'}</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, margin: '20px 0' }}>
+                {examQs.map((q, idx) => {
+                  const answer = studentAnswers[q.id] || '';
+                  const score = currentGrades[q.id] || 0;
+                  return (
+                    <div key={q.id} style={{ padding: 16, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <h4 style={{ margin: 0, color: 'var(--accent-light)' }}>Question {idx + 1} ({q.points} pt{q.points > 1 ? 's' : ''})</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{t('qbankPointsLabel')} :</label>
+                          <input type="number" min="0" max={q.points} step="0.5" className="form-input" style={{ width: 80, padding: '6px 10px' }}
+                            value={score} onChange={e => handleUpdateQuestionGrade(q.id, e.target.value)} />
+                        </div>
+                      </div>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12, fontStyle: 'italic' }}>
+                        {q.enonce}
+                      </p>
+                      <div style={{ background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6, border: '1px solid var(--border)' }}>
+                        {q.typeReponse === 'code' ? (
+                          <pre style={{ margin: 0, fontFamily: 'Fira Code, monospace', fontSize: '0.85rem', color: '#c4b5fd', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                            {answer || '// Aucune réponse fournie'}
+                          </pre>
+                        ) : q.typeReponse === 'uml' ? (
+                          <div>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>📐 Description UML :</span>
+                            <pre style={{ margin: 0, fontFamily: 'Fira Code, monospace', fontSize: '0.85rem', color: '#67e8f9', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                              {answer || '// Aucune réponse fournie'}
+                            </pre>
+                          </div>
+                        ) : (
+                          <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
+                            {answer || '(Aucune réponse fournie)'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">{t('gradingCommentLabel')}</label>
+                <textarea className="form-textarea" placeholder={t('gradingCommentPlaceholder')}
+                  value={currentComment} onChange={e => setCurrentComment(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  {t('gradingFinalScore')} <span style={{ color: 'var(--accent-light)' }}>
+                    {Object.values(currentGrades).reduce((acc, pts) => acc + Number(pts), 0)}
+                  </span> / {examQs.reduce((acc, q) => acc + Number(q.points), 0)} pts
+                </div>
+                <div className="modal-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowGradingModal(false)}>{t('cancel')}</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleSaveGrading}>{t('gradingSaveBtn')}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

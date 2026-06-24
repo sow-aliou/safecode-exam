@@ -58,13 +58,22 @@ app.post('/api/teacher/login', (req, res) => {
 
 // Récupérer toutes les sessions d'un enseignant
 app.get('/api/sessions', (req, res) => {
-  db.all(
-    `SELECT s.id, s.codeAccesSecret as code, s.dateHeureDebut as date, e.titre as title, 
-            e.dureeMinutes as duree, e.instructions, e.langageCible, e.sujetPdfBase64,
+  const teacherId = req.query.teacherId;
+  let query = `SELECT s.id, s.codeAccesSecret as code, s.dateHeureDebut as date, e.titre as title, 
+            e.dureeMinutes as duree, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte,
             (SELECT COUNT(*) FROM Copie WHERE session_id = s.id) as totalStudents
      FROM SessionExamen s
-     JOIN Examen e ON s.examen_id = e.id`,
-    [],
+     JOIN Examen e ON s.examen_id = e.id`;
+  const params = [];
+
+  if (teacherId) {
+    query += ` WHERE e.enseignant_id = ?`;
+    params.push(teacherId);
+  }
+
+  db.all(
+    query,
+    params,
     (err, rows) => {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -103,7 +112,41 @@ app.post('/api/sessions', (req, res) => {
   });
 });
 
-// Uploader le PDF sujet
+// Charger l'épreuve complète d'une session
+app.get('/api/sessions/:id/exam', (req, res) => {
+  const sessionId = req.params.id;
+  db.get(
+    `SELECT e.titre as title, e.dureeMinutes as duree, e.instructions, e.langageCible,
+            e.sujetPdfBase64, e.enonceTexte, s.dateHeureDebut as date, s.codeAccesSecret as code
+     FROM Examen e
+     JOIN SessionExamen s ON s.examen_id = e.id
+     WHERE s.id = ?`,
+    [sessionId],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.status(404).json({ error: 'Session introuvable.' });
+      res.json({ success: true, exam: row });
+    }
+  );
+});
+
+// Mettre à jour l'épreuve complète (questions, PDF, titre, durée...)
+app.post('/api/sessions/:id/exam', (req, res) => {
+  const sessionId = req.params.id;
+  const { title, duree, instructions, langageCible, sujetPdfBase64, questions } = req.body;
+
+  db.run(
+    `UPDATE Examen SET titre = ?, dureeMinutes = ?, instructions = ?, langageCible = ?, sujetPdfBase64 = ?, enonceTexte = ?
+     WHERE id = (SELECT examen_id FROM SessionExamen WHERE id = ?)`,
+    [title, duree || 120, instructions, langageCible || 'Java', sujetPdfBase64 || null, JSON.stringify(questions || []), sessionId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true });
+    }
+  );
+});
+
+// Uploader le PDF sujet (legacy)
 app.post('/api/sessions/:id/pdf', (req, res) => {
   const sessionId = req.params.id;
   const { pdfBase64 } = req.body;
@@ -205,7 +248,7 @@ app.post('/api/student/login', (req, res) => {
 
   db.get(
     `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, 
-            e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64
+            e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte
      FROM Utilisateur u
      JOIN Copie c ON c.etudiant_id = u.id
      JOIN SessionExamen s ON c.session_id = s.id
@@ -242,10 +285,83 @@ app.post('/api/copies/sync', (req, res) => {
   );
 });
 
+// ================= BANQUE DE QUESTIONS =================
+
+// Récupérer la banque de questions d'un enseignant
+app.get('/api/questionbank', (req, res) => {
+  const teacherId = req.query.teacherId;
+  db.all(
+    `SELECT * FROM BanqueQuestions WHERE enseignant_id = ?`,
+    [teacherId || 1],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, questions: rows });
+    }
+  );
+});
+
+// Ajouter une question à la banque
+app.post('/api/questionbank', (req, res) => {
+  const { teacherId, enonce, typeReponse, points } = req.body;
+  db.run(
+    `INSERT INTO BanqueQuestions (enseignant_id, enonce, typeReponse, points) VALUES (?, ?, ?, ?)`,
+    [teacherId || 1, enonce, typeReponse, points || 1],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, id: this.lastID });
+    }
+  );
+});
+
+// Supprimer une question de la banque
+app.delete('/api/questionbank/:id', (req, res) => {
+  const questionId = req.params.id;
+  db.run(
+    `DELETE FROM BanqueQuestions WHERE id = ?`,
+    [questionId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true });
+    }
+  );
+});
+
+// ================= CORRECTIONS & RESULTATS =================
+
+// Récupérer les copies d'une session
+app.get('/api/sessions/:id/results', (req, res) => {
+  const sessionId = req.params.id;
+  db.all(
+    `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, u.email,
+            c.id as copieId, c.contenuCode, c.fluxUML, c.estValidee, c.notesJSON, c.noteFinale, c.commentaire, c.horodatageDerniereModif
+     FROM Copie c
+     JOIN Utilisateur u ON c.etudiant_id = u.id
+     WHERE c.session_id = ?`,
+    [sessionId],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, results: rows });
+    }
+  );
+});
+
+// Corriger une copie
+app.post('/api/copies/:id/grade', (req, res) => {
+  const copieId = req.params.id;
+  const { notesJSON, noteFinale, commentaire } = req.body;
+  db.run(
+    `UPDATE Copie SET notesJSON = ?, noteFinale = ?, commentaire = ? WHERE id = ?`,
+    [JSON.stringify(notesJSON), noteFinale, commentaire, copieId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true });
+    }
+  );
+});
+
 // Soumettre définitivement la copie
 app.post('/api/copies/submit', (req, res) => {
   const { copieId } = req.body;
-
   db.run(
     `UPDATE Copie SET estValidee = 1, horodatageDerniereModif = CURRENT_TIMESTAMP WHERE id = ?`,
     [copieId],

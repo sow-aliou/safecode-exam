@@ -49,6 +49,7 @@ function initDb() {
     db.run(`
       CREATE TABLE IF NOT EXISTS Examen (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enseignant_id INTEGER,
         titre TEXT,
         enonceTexte TEXT,
         langageCible TEXT,
@@ -82,10 +83,18 @@ function initDb() {
         fluxUML BLOB,
         horodatageDerniereModif DATETIME DEFAULT CURRENT_TIMESTAMP,
         estValidee BOOLEAN DEFAULT 0,
+        notesJSON TEXT DEFAULT '{}',
+        noteFinale REAL DEFAULT 0,
+        commentaire TEXT DEFAULT '',
         FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id),
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id)
       )
-    `);
+    `, () => {
+      // Pour les bases de données existantes, ajouter les colonnes si elles manquent
+      db.run("ALTER TABLE Copie ADD COLUMN notesJSON TEXT DEFAULT '{}'", (err) => {});
+      db.run("ALTER TABLE Copie ADD COLUMN noteFinale REAL DEFAULT 0", (err) => {});
+      db.run("ALTER TABLE Copie ADD COLUMN commentaire TEXT DEFAULT ''", (err) => {});
+    });
 
     // 6. Table JournalLog
     db.run(`
@@ -97,6 +106,17 @@ function initDb() {
         description TEXT,
         criticite TEXT,
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id)
+      )
+    `);
+
+    // 7. Table BanqueQuestions
+    db.run(`
+      CREATE TABLE IF NOT EXISTS BanqueQuestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enseignant_id INTEGER,
+        enonce TEXT,
+        typeReponse TEXT,
+        points INTEGER
       )
     `);
 
@@ -119,14 +139,20 @@ function initDb() {
 }
 
 // Récupérer toutes les sessions d'examen
-export function getSessionsFromDb() {
+export function getSessionsFromDb(teacherId) {
   return new Promise((resolve, reject) => {
-    db.all(`
+    let query = `
       SELECT s.id, s.codeAccesSecret as code, e.titre as title, s.dateHeureDebut as date, 
-             e.dureeMinutes as duree, e.instructions, e.langageCible, e.sujetPdfBase64
+             e.dureeMinutes as duree, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte
       FROM SessionExamen s
       JOIN Examen e ON s.examen_id = e.id
-    `, [], (err, rows) => {
+    `;
+    let params = [];
+    if (teacherId) {
+      query += ` WHERE e.enseignant_id = ?`;
+      params.push(teacherId);
+    }
+    db.all(query, params, (err, rows) => {
       if (err) reject(err);
       else resolve(rows);
     });
@@ -138,8 +164,8 @@ export function createSessionInDb(sessionData) {
   return new Promise((resolve, reject) => {
     db.serialize(() => {
       db.run(
-        `INSERT INTO Examen (titre, langageCible, dureeMinutes, instructions, sujetPdfBase64) VALUES (?, ?, ?, ?, ?)`,
-        [sessionData.title, sessionData.langageCible || 'Java', sessionData.duree || 120, sessionData.instructions || '', sessionData.sujetPdfBase64 || null],
+        `INSERT INTO Examen (enseignant_id, titre, langageCible, dureeMinutes, instructions, sujetPdfBase64) VALUES (?, ?, ?, ?, ?, ?)`,
+        [sessionData.teacherId || null, sessionData.title, sessionData.langageCible || 'Java', sessionData.duree || 120, sessionData.instructions || '', sessionData.sujetPdfBase64 || null],
         function (err) {
           if (err) return reject(err);
           const examenId = this.lastID;
@@ -158,12 +184,12 @@ export function createSessionInDb(sessionData) {
   });
 }
 
-// Mettre à jour le sujet PDF
-export function updateSessionPdfInDb(sessionId, pdfBase64) {
+// Mettre à jour l'examen complet
+export function updateSessionExamInDb(sessionId, examData) {
   return new Promise((resolve, reject) => {
     db.run(
-      `UPDATE Examen SET sujetPdfBase64 = ? WHERE id = (SELECT examen_id FROM SessionExamen WHERE id = ?)`,
-      [pdfBase64, sessionId],
+      `UPDATE Examen SET titre = ?, dureeMinutes = ?, instructions = ?, langageCible = ?, sujetPdfBase64 = ?, enonceTexte = ? WHERE id = (SELECT examen_id FROM SessionExamen WHERE id = ?)`,
+      [examData.title, examData.duree, examData.instructions, examData.langageCible, examData.sujetPdfBase64, JSON.stringify(examData.questions), sessionId],
       function (err) {
         if (err) reject(err);
         else resolve({ success: true });
@@ -275,6 +301,80 @@ export function saveCodeToDb(code, copieId = 1) {
         } else {
           resolve({ success: true, changes: this.changes });
         }
+      }
+    );
+  });
+}
+
+// Récupérer la banque de questions d'un enseignant
+export function getQuestionBankFromDb(teacherId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT * FROM BanqueQuestions WHERE enseignant_id = ?`,
+      [teacherId],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      }
+    );
+  });
+}
+
+// Ajouter une question à la banque
+export function addQuestionToBankInDb(teacherId, question) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO BanqueQuestions (enseignant_id, enonce, typeReponse, points) VALUES (?, ?, ?, ?)`,
+      [teacherId, question.enonce, question.typeReponse, question.points],
+      function (err) {
+        if (err) reject(err);
+        else resolve({ success: true, id: this.lastID });
+      }
+    );
+  });
+}
+
+// Supprimer une question de la banque
+export function deleteQuestionFromBankInDb(questionId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `DELETE FROM BanqueQuestions WHERE id = ?`,
+      [questionId],
+      function (err) {
+        if (err) reject(err);
+        else resolve({ success: true });
+      }
+    );
+  });
+}
+
+// Récupérer toutes les copies et résultats pour une session d'examen
+export function getResultsForSessionFromDb(sessionId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, u.email,
+              c.id as copieId, c.contenuCode, c.fluxUML, c.estValidee, c.notesJSON, c.noteFinale, c.commentaire, c.horodatageDerniereModif
+       FROM Copie c
+       JOIN Utilisateur u ON c.etudiant_id = u.id
+       WHERE c.session_id = ?`,
+      [sessionId],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      }
+    );
+  });
+}
+
+// Enregistrer la correction d'une copie
+export function saveGradeToDb(copieId, notesJSON, noteFinale, commentaire) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE Copie SET notesJSON = ?, noteFinale = ?, commentaire = ? WHERE id = ?`,
+      [JSON.stringify(notesJSON), noteFinale, commentaire, copieId],
+      function (err) {
+        if (err) reject(err);
+        else resolve({ success: true });
       }
     );
   });

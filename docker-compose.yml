@@ -6,13 +6,17 @@ services:
       dockerfile: Dockerfile
     container_name: safecode_backend
     volumes:
-      # Persistance de la base de données uniquement (flag :z requis sur Fedora avec SELinux/Podman)
-      - ./server/server_database.db:/server/server_database.db:z
+      # :z = requis sur Fedora/RHEL avec SELinux/Podman pour les permissions
+      - ./server:/server:z
+      # Préserver le node_modules installé dans l'image (ne pas l'écraser)
+      - safecode_backend_modules:/server/node_modules
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - PORT=3000
+    # nodemon surveille les changements → redémarre le serveur automatiquement
+    command: npx nodemon server.js
     restart: unless-stopped
 
   # ===== SERVICE 2: Frontend Vite (React) =====
@@ -23,9 +27,19 @@ services:
     container_name: safecode_frontend
     depends_on:
       - backend
+    volumes:
+      # :z = requis sur Fedora/RHEL avec SELinux/Podman
+      - .:/app:z
+      # Préserver le node_modules installé dans l'image
+      - safecode_frontend_modules:/app/node_modules
     ports:
       - "5173:5173"
     environment:
       - NODE_ENV=development
       - VITE_API_URL=http://localhost:3000
     restart: unless-stopped
+
+# Volumes nommés pour préserver node_modules de l'image
+volumes:
+  safecode_backend_modules:
+  safecode_frontend_modules:
