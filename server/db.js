@@ -103,9 +103,12 @@ function initServerDb() {
         enseignant_id INTEGER,
         enonce TEXT,
         typeReponse TEXT,
-        points INTEGER
+        points INTEGER,
+        testCases TEXT DEFAULT '[]'
       )
-    `);
+    `, () => {
+      db.run("ALTER TABLE BanqueQuestions ADD COLUMN testCases TEXT DEFAULT '[]'", () => {});
+    });
   });
 }
 

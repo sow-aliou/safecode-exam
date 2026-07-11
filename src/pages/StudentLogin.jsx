@@ -94,7 +94,7 @@ export default function StudentLogin() {
 
       <div className="glass-card auth-card animate-fade-up">
         <div className="auth-header">
-          <div className="auth-icon" style={{ background: 'rgba(6,182,212,0.15)', color: '#67e8f9' }}>
+          <div className="auth-icon" style={{ background: 'var(--student-subtle)', color: 'var(--student-light)', border: '1px solid rgba(20,184,166,0.2)' }}>
             🎓
           </div>
           <h2>{t('studentTitle')}</h2>
@@ -126,7 +126,7 @@ export default function StudentLogin() {
               onChange={e => setExamCode(e.target.value)}
               style={{ 
                 textTransform: 'uppercase', 
-                fontFamily: "'Fira Code', monospace", 
+                fontFamily: "'JetBrains Mono', monospace", 
                 fontSize: '1.1rem', 
                 textAlign: 'center',
                 letterSpacing: '0.15em'
@@ -170,7 +170,7 @@ export default function StudentLogin() {
         <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16, textAlign: 'center' }}>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             💡 {lang === 'fr' ? 'Mode démo :' : 'Demo mode:'}{' '}
-            <span style={{ fontFamily: 'Fira Code', color: 'var(--accent-light)', fontSize: '0.75rem' }}>
+            <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-light)', fontSize: '0.75rem', fontWeight: 600 }}>
               DEV_001 / 1234 / PASS123
             </span>
           </p>

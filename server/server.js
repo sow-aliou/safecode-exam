@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import nodemailer from 'nodemailer';
 import db from './db.js';
+import { autoGradeCopie } from './autograder.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -130,20 +131,34 @@ app.get('/api/sessions/:id/exam', (req, res) => {
   );
 });
 
-// Mettre à jour l'épreuve complète (questions, PDF, titre, durée...)
+// Mettre à jour l'épreuve complète (questions, PDF, titre, durée, date...)
 app.post('/api/sessions/:id/exam', (req, res) => {
   const sessionId = req.params.id;
-  const { title, duree, instructions, langageCible, sujetPdfBase64, questions } = req.body;
+  const { title, duree, instructions, langageCible, sujetPdfBase64, questions, dateHeureDebut } = req.body;
 
-  db.run(
-    `UPDATE Examen SET titre = ?, dureeMinutes = ?, instructions = ?, langageCible = ?, sujetPdfBase64 = ?, enonceTexte = ?
-     WHERE id = (SELECT examen_id FROM SessionExamen WHERE id = ?)`,
-    [title, duree || 120, instructions, langageCible || 'Java', sujetPdfBase64 || null, JSON.stringify(questions || []), sessionId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
-    }
-  );
+  db.serialize(() => {
+    db.run(
+      `UPDATE Examen SET titre = ?, dureeMinutes = ?, instructions = ?, langageCible = ?, sujetPdfBase64 = ?, enonceTexte = ?
+       WHERE id = (SELECT examen_id FROM SessionExamen WHERE id = ?)`,
+      [title, duree || 120, instructions, langageCible || 'Java', sujetPdfBase64 || null, JSON.stringify(questions || []), sessionId],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (dateHeureDebut) {
+          db.run(
+            `UPDATE SessionExamen SET dateHeureDebut = ? WHERE id = ?`,
+            [dateHeureDebut, sessionId],
+            (err2) => {
+              if (err2) return res.status(500).json({ error: err2.message });
+              res.json({ success: true });
+            }
+          );
+        } else {
+          res.json({ success: true });
+        }
+      }
+    );
+  });
 });
 
 // Uploader le PDF sujet (legacy)
@@ -285,47 +300,6 @@ app.post('/api/copies/sync', (req, res) => {
   );
 });
 
-// ================= BANQUE DE QUESTIONS =================
-
-// Récupérer la banque de questions d'un enseignant
-app.get('/api/questionbank', (req, res) => {
-  const teacherId = req.query.teacherId;
-  db.all(
-    `SELECT * FROM BanqueQuestions WHERE enseignant_id = ?`,
-    [teacherId || 1],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true, questions: rows });
-    }
-  );
-});
-
-// Ajouter une question à la banque
-app.post('/api/questionbank', (req, res) => {
-  const { teacherId, enonce, typeReponse, points } = req.body;
-  db.run(
-    `INSERT INTO BanqueQuestions (enseignant_id, enonce, typeReponse, points) VALUES (?, ?, ?, ?)`,
-    [teacherId || 1, enonce, typeReponse, points || 1],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true, id: this.lastID });
-    }
-  );
-});
-
-// Supprimer une question de la banque
-app.delete('/api/questionbank/:id', (req, res) => {
-  const questionId = req.params.id;
-  db.run(
-    `DELETE FROM BanqueQuestions WHERE id = ?`,
-    [questionId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
-    }
-  );
-});
-
 // ================= CORRECTIONS & RESULTATS =================
 
 // Récupérer les copies d'une session
@@ -355,6 +329,38 @@ app.post('/api/copies/:id/grade', (req, res) => {
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true });
+    }
+  );
+});
+
+// Auto-correction d'une copie (exécute le code et compare aux cas de tests)
+app.post('/api/copies/:id/auto-grade', (req, res) => {
+  const copieId = req.params.id;
+
+  // 1. Récupérer la copie et l'épreuve associée
+  db.get(
+    `SELECT c.*, e.enonceTexte, e.langageCible
+     FROM Copie c
+     JOIN SessionExamen s ON c.session_id = s.id
+     JOIN Examen e ON s.examen_id = e.id
+     WHERE c.id = ?`,
+    [copieId],
+    async (err, copie) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!copie) return res.status(404).json({ error: 'Copie introuvable.' });
+
+      let examQs = [];
+      try { examQs = JSON.parse(copie.enonceTexte || '[]'); } catch (_) {}
+
+      const lang = (copie.langageCible || 'python').toLowerCase().includes('java') ? 'java' : 'python';
+
+      try {
+        const result = await autoGradeCopie(copie, examQs, lang);
+        res.json({ success: true, ...result });
+      } catch (runErr) {
+        console.error('[AutoGrader] Erreur:', runErr);
+        res.status(500).json({ error: runErr.message });
+      }
     }
   );
 });

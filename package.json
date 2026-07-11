@@ -9,7 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "wait-on tcp:5173 && electron . --no-sandbox",
+    "electron": "wait-on tcp:5174 && electron . --no-sandbox",
     "dev:backend": "npm --prefix server run start",
     "dev:app": "concurrently -k \"npm run dev\" \"npm run electron\"",
     "dev:all": "concurrently -k \"npm --prefix server run start\" \"npm run dev:app\"",

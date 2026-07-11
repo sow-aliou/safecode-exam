@@ -116,9 +116,12 @@ function initDb() {
         enseignant_id INTEGER,
         enonce TEXT,
         typeReponse TEXT,
-        points INTEGER
+        points INTEGER,
+        testCases TEXT DEFAULT '[]'
       )
-    `);
+    `, () => {
+      db.run("ALTER TABLE BanqueQuestions ADD COLUMN testCases TEXT DEFAULT '[]'", () => {});
+    });
 
     // Initialisation d'une session de test pour l'interface de développement
     db.get("SELECT id FROM Utilisateur WHERE matricule = 'DEV_001'", (err, row) => {
@@ -324,8 +327,8 @@ export function getQuestionBankFromDb(teacherId) {
 export function addQuestionToBankInDb(teacherId, question) {
   return new Promise((resolve, reject) => {
     db.run(
-      `INSERT INTO BanqueQuestions (enseignant_id, enonce, typeReponse, points) VALUES (?, ?, ?, ?)`,
-      [teacherId, question.enonce, question.typeReponse, question.points],
+      `INSERT INTO BanqueQuestions (enseignant_id, enonce, typeReponse, points, testCases) VALUES (?, ?, ?, ?, ?)`,
+      [teacherId, question.enonce, question.typeReponse, question.points, JSON.stringify(question.testCases || [])],
       function (err) {
         if (err) reject(err);
         else resolve({ success: true, id: this.lastID });

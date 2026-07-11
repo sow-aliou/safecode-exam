@@ -41,11 +41,11 @@ function createWindow() {
     console.log('Fermeture par raccourci bloquée');
   });
 
-  // Si on est en dev (Vite par défaut sur 5173)
+  // Si on est en dev (Vite par défaut sur 5174)
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5174');
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));

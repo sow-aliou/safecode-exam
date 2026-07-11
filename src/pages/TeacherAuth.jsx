@@ -64,7 +64,7 @@ export default function TeacherAuth() {
 
       <div className="glass-card auth-card animate-fade-up">
         <div className="auth-header">
-          <div className="auth-icon" style={{ background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' }}>
+          <div className="auth-icon" style={{ background: 'var(--teacher-subtle)', color: 'var(--teacher-light)', border: '1px solid rgba(245,158,11,0.2)' }}>
             👨‍🏫
           </div>
           <h2>{t('teacherTitle')}</h2>
