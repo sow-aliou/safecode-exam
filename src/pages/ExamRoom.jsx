@@ -2,18 +2,27 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 import { useTranslation } from '../utils/lang';
+import UMLEditor from '../components/UMLEditor';
 
 const TYPE_ICONS = { texte: '📝', code: '💻', uml: '📐' };
 const TYPE_COLORS = { texte: 'var(--student-color)', code: 'var(--success)', uml: 'var(--teacher-color)' };
 
 // ─── Composant Minuterie ─────────────────────────────────────────────────────
-function Timer({ totalSeconds }) {
+function Timer({ totalSeconds, onExpire }) {
   const [seconds, setSeconds] = useState(totalSeconds);
+  const expiredRef = useRef(false);
+
   useEffect(() => {
-    if (seconds <= 0) return;
+    if (seconds <= 0) {
+      if (!expiredRef.current && onExpire) {
+        expiredRef.current = true;
+        onExpire();
+      }
+      return;
+    }
     const interval = setInterval(() => setSeconds(s => s - 1), 1000);
     return () => clearInterval(interval);
-  }, [seconds]);
+  }, [seconds, onExpire]);
 
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -28,7 +37,7 @@ function Timer({ totalSeconds }) {
 export default function ExamRoom() {
   const navigate = useNavigate();
   const { sessionCode } = useParams();
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
 
   const matricule   = sessionStorage.getItem('student_matricule') || 'DEV_001';
   const studentName = sessionStorage.getItem('student_name')      || 'Étudiant';
@@ -42,7 +51,9 @@ export default function ExamRoom() {
   const [showPdf, setShowPdf]   = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [saving, setSaving]     = useState(false);
+  const [timeExpired, setTimeExpired] = useState(false);
   const saveTimer = useRef(null);
+  const submittingRef = useRef(false);
 
   // Helpers TYPE_CONFIG avec traductions dynamiques
   const TYPE_CONFIG = {
@@ -86,8 +97,15 @@ export default function ExamRoom() {
       questions
     });
 
-    // Initialiser les réponses vides
-    setAnswers(Object.fromEntries(questions.map(q => [q.id, ''])));
+    // Initialiser les réponses avec le type préconfiguré ou depuis la sauvegarde
+    let initialAnswers = Object.fromEntries(questions.map(q => [q.id, { type: q.typeReponse || null, content: '' }]));
+    if (parsed.contenuCode) {
+      try {
+        const saved = JSON.parse(parsed.contenuCode);
+        initialAnswers = { ...initialAnswers, ...saved };
+      } catch (e) {}
+    }
+    setAnswers(initialAnswers);
   }, [navigate]);
 
   // ── Sauvegarde automatique avec debounce (1.5s) ─────────────────────────
@@ -118,22 +136,37 @@ export default function ExamRoom() {
     if (!examData) return;
     const q = examData.questions[currentQ];
     if (!q) return;
-    setAnswers(prev => {
-      const updated = { ...prev, [q.id]: value ?? '' };
-      saveAnswer(updated);
-      return updated;
-    });
-  }, [examData, currentQ, saveAnswer]);
+    setAnswers(prev => ({ ...prev, [q.id]: { ...prev[q.id], content: value ?? '' } }));
+  }, [examData, currentQ]);
+
+  const handleTypeChange = useCallback((type) => {
+    if (!examData) return;
+    const q = examData.questions[currentQ];
+    if (!q) return;
+    setAnswers(prev => ({ ...prev, [q.id]: { type, content: '' } }));
+  }, [examData, currentQ]);
+
+  useEffect(() => {
+    if (Object.keys(answers).length > 0) {
+      saveAnswer(answers);
+    }
+  }, [answers, saveAnswer]);
 
   // ── Soumission ──────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setShowSubmitModal(false);
     try {
       if (window.electronAPI) {
-        // Sauvegarder une dernière fois avant soumission
         await window.electronAPI.saveCode(JSON.stringify(answers), parseInt(copieId));
+      } else {
+        await fetch('http://localhost:3000/api/copies/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ copieId: parseInt(copieId), answers })
+        });
       }
-      // Marquer la copie comme validée sur le serveur central
       await fetch('http://localhost:3000/api/copies/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,7 +177,12 @@ export default function ExamRoom() {
     }
     sessionStorage.clear();
     navigate('/');
-  };
+  }, [answers, copieId, navigate]);
+
+  const handleTimeExpired = useCallback(() => {
+    setTimeExpired(true);
+    handleSubmit();
+  }, [handleSubmit]);
 
   if (!examData) {
     return (
@@ -155,7 +193,12 @@ export default function ExamRoom() {
   }
 
   const question      = examData.questions[currentQ];
-  const answeredCount = Object.values(answers).filter(a => a?.trim() !== '').length;
+  const answeredCount = Object.values(answers).filter(a => {
+    if (!a) return false;
+    if (typeof a === 'string') return a.trim() !== '';
+    if (typeof a === 'object') return Object.keys(a).length > 0;
+    return false;
+  }).length;
   const totalQ        = examData.questions.length;
   const progressPct   = Math.round((answeredCount / totalQ) * 100);
   const initials      = matricule.slice(0, 2).toUpperCase();
@@ -166,20 +209,24 @@ export default function ExamRoom() {
       {/* ── Topbar ─────────────────────────────────────────────────────── */}
       <header className="exam-topbar">
         <div className="exam-info">
-          <h2>🛡️ {examData.titre}</h2>
-          <p>{t('examRoomSession')} <strong style={{ color: 'var(--accent-light)', fontFamily: 'Fira Code' }}>{sessionCode}</strong>
-            &nbsp;·&nbsp;{studentName} ({matricule})
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              background: 'linear-gradient(135deg, var(--accent), var(--accent-dark))',
+              borderRadius: 7, width: 24, height: 24,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.75rem', flexShrink: 0
+            }}>🛡</span>
+            {examData.titre}
+          </h2>
+          <p>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent-light)', fontWeight: 700, fontSize: '0.95rem' }}>{sessionCode}</span>
+            <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
+            <span style={{ fontSize: '0.95rem', fontWeight: 500 }}>{studentName}</span> <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>({matricule})</span>
           </p>
         </div>
-        <Timer totalSeconds={examData.dureeMinutes * 60} />
+        <Timer totalSeconds={examData.dureeMinutes * 60} onExpire={handleTimeExpired} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {examData.sujetPdfBase64 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowPdf(v => !v)}
-              style={{ borderColor: showPdf ? 'var(--accent)' : undefined }}>
-              📄 {showPdf ? t('examRoomHidePdf') : t('examRoomShowPdf')}
-            </button>
-          )}
-          <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--student-color), #0891b2)' }}>
+          <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--student-color), #0d9488)' }}>
             {initials}
           </div>
           <button id="btn-submit-exam" className="btn btn-danger btn-sm" onClick={() => setShowSubmitModal(true)}>
@@ -200,221 +247,306 @@ export default function ExamRoom() {
 
       <div className="exam-body">
         {/* ── Sidebar Navigation ──────────────────────────────────────────── */}
-        <aside className="questions-sidebar">
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            {t('examRoomQuestionTitle')}S
+        <aside className="questions-sidebar" style={{ width: answers[question?.id]?.type === 'uml' ? '200px' : '260px', transition: 'width 0.3s ease' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            RÉPONSES
           </div>
 
           {examData.questions.map((q, idx) => {
-            const isAnswered = answers[q.id]?.trim() !== '';
-            const isCurrent  = idx === currentQ && !showPdf;
+            const rawAnswer = answers[q.id];
+            const isAnswered = rawAnswer && rawAnswer.type && typeof rawAnswer.content === 'string' && rawAnswer.content.trim() !== '';
+            const isCurrent  = idx === currentQ;
             return (
               <div key={q.id}
-                onClick={() => { setCurrentQ(idx); setShowPdf(false); }}
+                onClick={() => setCurrentQ(idx)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 12px', borderRadius: 10, marginBottom: 4,
+                  padding: '10px 12px', borderRadius: 8, marginBottom: 2,
                   cursor: 'pointer', transition: 'all 0.15s',
-                  background: isCurrent ? 'rgba(99,102,241,0.15)' : 'transparent',
-                  border: isCurrent ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                  background: isCurrent ? 'var(--accent-subtle)' : 'transparent',
+                  border: isCurrent ? '1px solid rgba(16,185,129,0.3)' : '1px solid transparent',
                 }}
-                onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.035)'; }}
                 onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background = 'transparent'; }}
               >
-                {/* Indicateur de complétion */}
+                {/* Numéro/check */}
                 <div style={{
-                  width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                  width: 32, height: 32, borderRadius: 8, flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '0.75rem', fontWeight: 700,
-                  background: isAnswered ? 'rgba(16,185,129,0.15)' : isCurrent ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)',
+                  fontSize: '0.85rem', fontWeight: 800,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  background: isAnswered ? 'var(--success-subtle)' : isCurrent ? 'var(--accent-subtle)' : 'rgba(255,255,255,0.04)',
                   color: isAnswered ? 'var(--success)' : isCurrent ? 'var(--accent-light)' : 'var(--text-muted)',
-                  border: `1px solid ${isAnswered ? 'rgba(16,185,129,0.3)' : isCurrent ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
+                  border: `1px solid ${isAnswered ? 'rgba(34,197,94,0.3)' : isCurrent ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
                 }}>
                   {isAnswered ? '✓' : idx + 1}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: isCurrent ? 600 : 400, color: isCurrent ? '#fff' : 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {TYPE_CONFIG[q.typeReponse]?.icon} Q{idx + 1} — {q.points} pts
+                  <div style={{ fontSize: '0.95rem', fontWeight: isCurrent ? 600 : 400, color: isCurrent ? 'var(--accent-light)' : 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {answers[q.id]?.type ? TYPE_CONFIG[answers[q.id].type]?.icon : '❓'} R{idx + 1} — {q.points} pts
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {q.enonce?.slice(0, 32)}{q.enonce?.length > 32 ? '…' : ''}
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>
+                    {q.enonce?.slice(0, 30)}{q.enonce?.length > 30 ? '…' : ''}
                   </div>
                 </div>
               </div>
             );
           })}
+          
+          <button
+            className="btn btn-outline btn-sm"
+            style={{ width: '100%', marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderStyle: 'dashed' }}
+            onClick={() => {
+              const newId = `custom-${Date.now()}`;
+              const newQuestion = {
+                id: newId,
+                enonce: 'Nouvelle réponse libre',
+                typeReponse: 'texte',
+                points: 0
+              };
+              const newQuestions = [...examData.questions, newQuestion];
+              setExamData({ ...examData, questions: newQuestions });
+              setAnswers(prev => ({ ...prev, [newId]: { type: 'texte', content: '' } }));
+              setCurrentQ(newQuestions.length - 1);
+            }}
+          >
+            ➕ Ajouter une réponse
+          </button>
 
-          {/* Résumé en bas */}
+          {/* Résumé progression */}
           <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: answeredCount === totalQ ? 'var(--success)' : 'var(--accent-light)' }}>
-              {answeredCount}/{totalQ}
+            <div style={{
+              fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.03em',
+              color: answeredCount === totalQ ? 'var(--success)' : 'var(--accent-light)'
+            }}>
+              {answeredCount}<span style={{ fontSize: '1.1rem', fontWeight: 500, color: 'var(--text-muted)' }}>/{totalQ}</span>
             </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{t('examRoomProgress')}</div>
-            {/* Indicateur de sauvegarde */}
-            <div style={{ marginTop: 10, fontSize: '0.7rem', color: saving ? 'var(--warning)' : lastSaved ? 'var(--success)' : 'var(--text-muted)' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>RÉPONSES COMPLÉTÉES</div>
+            <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ width: `${(answeredCount/totalQ)*100}%`, height: '100%', background: answeredCount === totalQ ? 'var(--success)' : 'var(--accent)', borderRadius: 4, transition: 'width 0.4s ease' }} />
+            </div>
+            <div style={{ marginTop: 10, fontSize: '0.8rem', color: saving ? 'var(--warning)' : lastSaved ? 'var(--success)' : 'var(--text-muted)' }}>
               {saving ? `⏳ ${t('examRoomSaving')}` : lastSaved ? `✅ ${t('examRoomSaved')} ${lastSaved.toLocaleTimeString()}` : `● ${t('examRoomNotSaved')}`}
             </div>
           </div>
         </aside>
 
-        {/* ── Zone de travail ─────────────────────────────────────────────── */}
-        <div className="question-workspace">
-
-          {/* ─ Vue PDF ─ */}
-          {showPdf && examData.sujetPdfBase64 ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: 16 }}>
-              <div className="section-header" style={{ marginBottom: 12 }}>
-                <h2>📄 Sujet Officiel de l'Examen</h2>
-                <button className="btn btn-ghost btn-sm" onClick={() => setShowPdf(false)}>← Retour aux questions</button>
-              </div>
-              <div style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 'var(--radius)', overflow: 'hidden', border: '1px solid var(--border)' }}>
-                <iframe src={examData.sujetPdfBase64} title="Sujet PDF" width="100%" height="100%" style={{ border: 'none' }} />
-              </div>
+        {/* ── Zone de travail (Écran Partagé) ─────────────────────────────── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+          
+          {/* ─ Panneau Gauche : Sujet Global & PDF ─ */}
+          <div style={{ flex: answers[question?.id]?.type === 'uml' ? '0 0 30%' : '0 0 45%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+            <div className="section-header" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', margin: 0 }}>
+              <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>📄 Sujet Officiel / Contexte Global</h2>
             </div>
-          ) : (
-            /* ─ Vue question ─ */
-            <div className="question-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {examData.instructions && (
+                <div style={{ padding: 20, fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-secondary)', borderBottom: examData.sujetPdfBase64 ? '1px solid var(--border)' : 'none' }}>
+                  {examData.instructions.split('\n').map((line, i) => <p key={i} style={{ margin: '0 0 8px 0' }}>{line}</p>)}
+                </div>
+              )}
+              {examData.sujetPdfBase64 && (
+                <div style={{ flex: 1, minHeight: 400 }}>
+                  <iframe src={examData.sujetPdfBase64} title="Sujet PDF" width="100%" height="100%" style={{ border: 'none' }} />
+                </div>
+              )}
+              {!examData.instructions && !examData.sujetPdfBase64 && (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Aucun contexte global fourni par l'enseignant.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ─ Panneau Droit : Zone de Travail (Question en cours) ─ */}
+          <div className="question-workspace" style={{ flex: answers[question?.id]?.type === 'uml' ? '1 1 70%' : '1 1 55%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
+            <div className="question-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: 0, border: 'none' }}>
 
               {/* En-tête question */}
               <div className="question-statement">
                 {/* Fil d'Ariane */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                    QUESTION {currentQ + 1} SUR {totalQ}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <span style={{
+                    fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700,
+                    textTransform: 'uppercase', letterSpacing: '0.1em',
+                    padding: '3px 10px', background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid var(--border)', borderRadius: 6
+                  }}>
+                    R{currentQ + 1}/{totalQ}
                   </span>
                   <div style={{ flex: 1, height: 2, background: 'var(--border)', borderRadius: 4 }}>
                     <div style={{ width: `${((currentQ + 1) / totalQ) * 100}%`, height: '100%', background: 'var(--accent)', borderRadius: 4, transition: 'width 0.3s' }} />
                   </div>
                   <span style={{
-                    padding: '2px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700,
-                    background: `${TYPE_CONFIG[question?.typeReponse]?.color || 'var(--accent)'}22`,
-                    color: TYPE_CONFIG[question?.typeReponse]?.color || 'var(--accent)',
-                    border: `1px solid ${TYPE_CONFIG[question?.typeReponse]?.color || 'var(--accent)'}44`,
+                    fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-light)',
+                    background: 'var(--accent-subtle)', padding: '3px 12px', borderRadius: 999,
+                    border: '1px solid rgba(16,185,129,0.2)',
+                    fontFamily: "'JetBrains Mono', monospace"
                   }}>
-                    {TYPE_CONFIG[question?.typeReponse]?.icon} {TYPE_CONFIG[question?.typeReponse]?.label}
-                  </span>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-light)', background: 'rgba(99,102,241,0.1)', padding: '2px 10px', borderRadius: 20, border: '1px solid rgba(99,102,241,0.2)' }}>
                     {question?.points} pt{question?.points > 1 ? 's' : ''}
                   </span>
                 </div>
 
                 {/* Énoncé */}
-                <h3 style={{ fontSize: '1.05rem', lineHeight: 1.7, color: '#e2e8f0', marginBottom: 12 }}>
+                <h3 style={{ fontSize: '1.3rem', lineHeight: 1.6, color: '#e2e8f0', marginBottom: 16, fontWeight: 700 }}>
                   {question?.enonce}
                 </h3>
 
-                {/* Instructions générales */}
-                {examData.instructions && (
-                  <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.05)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.1)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    📌 {examData.instructions}
-                  </div>
-                )}
               </div>
 
               {/* Zone de réponse */}
               <div className="answer-area" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div className="answer-header">
-                  <span>{TYPE_CONFIG[question?.typeReponse]?.icon} {t('examRoomWorkspace')}</span>
+                <div className="answer-header" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '1rem', fontWeight: 600 }}>
+                    {answers[question?.id]?.type ? (
+                      <>{TYPE_CONFIG[answers[question.id].type]?.icon} {t('examRoomWorkspace')}</>
+                    ) : (
+                      <>🛠 Choisissez votre outil de réponse</>
+                    )}
+                  </span>
+                  {answers[question?.id]?.type && (
+                     <button className="btn btn-ghost btn-sm" onClick={() => handleTypeChange(null)} style={{ fontSize: '0.8rem', padding: '4px 8px', color: 'var(--text-muted)' }}>
+                       🔄 Changer d'outil
+                     </button>
+                  )}
                 </div>
 
-                {/* Texte libre */}
-                {question?.typeReponse === 'texte' && (
-                  <div className="text-answer-area" style={{ flex: 1 }}>
-                    <textarea
-                      id="text-answer"
-                      placeholder="Rédigez votre réponse ici…"
-                      value={answers[question.id] || ''}
-                      onChange={e => handleAnswerChange(e.target.value)}
-                      style={{ height: '100%', resize: 'none', caretColor: 'var(--accent)' }}
-                    />
+                {!answers[question?.id]?.type ? (
+                  <div style={{ flex: 1, display: 'flex', gap: 16, padding: 30, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
+                      <div key={type} onClick={() => handleTypeChange(type)}
+                        style={{ padding: 24, background: 'var(--bg-lighter)', border: '1px solid var(--border)', borderRadius: 12, cursor: 'pointer', textAlign: 'center', minWidth: 150, transition: 'all 0.2s' }}
+                        onMouseOver={e => Object.assign(e.currentTarget.style, { borderColor: cfg.color, transform: 'translateY(-2px)' })}
+                        onMouseOut={e => Object.assign(e.currentTarget.style, { borderColor: 'var(--border)', transform: 'translateY(0)' })}>
+                        <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>{cfg.icon}</div>
+                        <div style={{ fontWeight: 600, color: cfg.color }}>{cfg.label}</div>
+                      </div>
+                    ))}
                   </div>
-                )}
+                ) : (
+                  <>
+                    {/* Texte libre */}
+                    {answers[question.id].type === 'texte' && (
+                      <div className="text-answer-area" style={{ flex: 1 }}>
+                        <textarea
+                          id="text-answer"
+                          placeholder="Rédigez votre réponse ici…"
+                          value={answers[question.id].content || ''}
+                          onChange={e => handleAnswerChange(e.target.value)}
+                          style={{ height: '100%', resize: 'none', caretColor: 'var(--accent)' }}
+                        />
+                      </div>
+                    )}
 
-                {/* Éditeur de code */}
-                {question?.typeReponse === 'code' && (
-                  <div style={{ flex: 1, overflow: 'hidden', borderRadius: 8, border: '1px solid var(--border)' }}>
-                    <Editor
-                      height="100%"
-                      language={examData.langageCible.toLowerCase()}
-                      theme="vs-dark"
-                      value={answers[question.id] || ''}
-                      onChange={handleAnswerChange}
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        wordWrap: 'on',
-                        quickSuggestions: false,
-                        suggestOnTriggerCharacters: false,
-                        parameterHints: { enabled: false },
-                        snippetSuggestions: 'none',
-                        contextmenu: false,
-                        lineNumbers: 'on',
-                        scrollBeyondLastLine: false,
-                        padding: { top: 12 }
-                      }}
-                    />
-                  </div>
-                )}
+                    {/* Éditeur de code */}
+                    {answers[question.id].type === 'code' && (
+                      <div style={{ flex: 1, overflow: 'hidden', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <Editor
+                          height="100%"
+                          language={examData.langageCible.toLowerCase()}
+                          theme="vs-dark"
+                          value={answers[question.id].content || ''}
+                          onChange={handleAnswerChange}
+                          options={{
+                            minimap: { enabled: false },
+                            fontSize: 16,
+                            wordWrap: 'on',
+                            quickSuggestions: false,
+                            suggestOnTriggerCharacters: false,
+                            parameterHints: { enabled: false },
+                            snippetSuggestions: 'none',
+                            contextmenu: false,
+                            lineNumbers: 'on',
+                            scrollBeyondLastLine: false,
+                            padding: { top: 12 }
+                          }}
+                        />
+                      </div>
+                    )}
 
-                {/* Zone UML */}
-                {question?.typeReponse === 'uml' && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <textarea
-                      placeholder={`Décrivez votre modélisation UML ici (entités, relations, attributs, méthodes)...\n\nEx:\nClasse Etudiant\n  - matricule : String\n  - nom : String\n  + getMatricule() : String\n\nRelation: Etudiant --[1..N]--> Copie`}
-                      value={answers[question.id] || ''}
-                      onChange={e => handleAnswerChange(e.target.value)}
-                      style={{
-                        flex: 1, resize: 'none', fontFamily: "'Fira Code', monospace",
-                        fontSize: '0.85rem', lineHeight: 1.7,
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid var(--border)', borderRadius: 8,
-                        color: 'var(--text-primary)', padding: 16,
-                        caretColor: 'var(--teacher-color)'
-                      }}
-                    />
-                    <div style={{ padding: '8px 14px', background: 'rgba(139,92,246,0.05)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.15)', fontSize: '0.75rem', color: 'rgba(196,181,253,0.7)' }}>
-                      📐 Décrivez vos classes, attributs, méthodes et relations. Un éditeur UML graphique sera intégré prochainement.
-                    </div>
-                  </div>
+                    {/* Zone UML Graphique */}
+                    {answers[question.id].type === 'uml' && (
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+                        <div style={{ flex: 1, minHeight: 400 }}>
+                          <UMLEditor
+                            value={answers[question.id].content || ''}
+                            onChange={handleAnswerChange}
+                            readOnly={false}
+                          />
+                        </div>
+                        <div style={{ padding: '8px 16px', background: 'rgba(139,92,246,0.05)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.15)', fontSize: '0.85rem', color: 'rgba(196,181,253,0.7)', flexShrink: 0 }}>
+                          📐 Éditeur UML interactif — Ajoutez des classes, des attributs, des méthodes et reliez-les. Votre diagramme est sauvegardé automatiquement.
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
               {/* Navigation bas de page */}
-              <div className="exam-footer">
+              <div className="exam-footer" style={{ padding: '20px 24px', background: 'rgba(10, 10, 10, 0.5)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
                 <button
-                  className="btn btn-ghost btn-sm"
+                  className={`btn ${currentQ === 0 ? 'btn-ghost' : 'btn-outline'} btn-sm`}
                   disabled={currentQ === 0}
                   onClick={() => setCurrentQ(q => q - 1)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 8,
+                    opacity: currentQ === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  {t('examRoomPrev')}
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                  <span style={{ fontWeight: 600 }}>{t('examRoomPrev').replace('←', '').trim()}</span>
                 </button>
 
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   {examData.questions.map((_, idx) => (
                     <div key={idx}
                       onClick={() => setCurrentQ(idx)}
                       style={{
-                        width: 8, height: 8, borderRadius: '50%', cursor: 'pointer', transition: 'all 0.2s',
-                        background: idx === currentQ ? 'var(--accent)' :
-                                    answers[examData.questions[idx].id]?.trim() ? 'var(--success)' : 'var(--border)'
+                        width: idx === currentQ ? 24 : 10, 
+                        height: 10, 
+                        borderRadius: 10, 
+                        cursor: 'pointer', 
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        background: idx === currentQ ? 'var(--accent)'
+                          : (() => { const a = answers[examData.questions[idx].id]; return (a && a.type && typeof a.content === 'string' && a.content.trim() !== '') ? 'var(--success)' : 'var(--border)'; })()
                       }}
+                      title={`Question ${idx + 1}`}
                     />
                   ))}
                 </div>
 
                 <button
-                  className="btn btn-ghost btn-sm"
+                  className={`btn ${currentQ === totalQ - 1 ? 'btn-ghost' : 'btn-primary'} btn-sm`}
                   disabled={currentQ === totalQ - 1}
                   onClick={() => setCurrentQ(q => q + 1)}
-                  style={currentQ === totalQ - 1 ? {} : { color: 'var(--accent-light)', borderColor: 'rgba(99,102,241,0.3)' }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 8,
+                    opacity: currentQ === totalQ - 1 ? 0.5 : 1,
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  {t('examRoomNext')}
+                  <span style={{ fontWeight: 600 }}>{t('examRoomNext').replace('→', '').trim()}</span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                 </button>
               </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
+
+      {/* ── Modal temps écoulé ─────────────────────────────────────────── */}
+      {timeExpired && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h2>⏱ {lang === 'fr' ? 'Temps écoulé' : 'Time is up'}</h2>
+            <p>{lang === 'fr' ? 'Votre copie est en cours de soumission automatique…' : 'Your exam is being submitted automatically…'}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Modal de soumission ──────────────────────────────────────────── */}
       {showSubmitModal && (

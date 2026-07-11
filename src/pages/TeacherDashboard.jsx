@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useTranslation } from '../utils/lang';
+import UMLEditor from '../components/UMLEditor';
 
 // Calcule le statut d'une session à partir de sa date + durée
 function computeStatus(dateStr, dureeMinutes) {
@@ -28,7 +29,7 @@ export default function TeacherDashboard() {
   const [showStudentsModal, setShowStudentsModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState(null);
   
-  const [newSession, setNewSession] = useState({ title: '', date: '', heureDebut: '', heureFin: '', code: '' });
+  const [newSession, setNewSession] = useState({ title: '', date: '', heureDebut: '', duree: 120, code: '' });
   const [importedStudents, setImportedStudents] = useState([]);
   const [isSendingEmails, setIsSendingEmails] = useState(false);
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
@@ -36,10 +37,7 @@ export default function TeacherDashboard() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Question Bank Tab States
-  const [qBankQuestions, setQBankQuestions] = useState([]);
-  const [showQBankModal, setShowQBankModal] = useState(false);
-  const [newQBankQuestion, setNewQBankQuestion] = useState({ enonce: '', typeReponse: 'texte', points: 1 });
+
 
   // Results & Grading Tab States
   const [selectedResultSession, setSelectedResultSession] = useState('');
@@ -48,6 +46,8 @@ export default function TeacherDashboard() {
   const [activeCopie, setActiveCopie] = useState(null);
   const [currentGrades, setCurrentGrades] = useState({}); // { qId: score }
   const [currentComment, setCurrentComment] = useState('');
+  const [isAutoGrading, setIsAutoGrading] = useState(false);
+  const [autoGradeResult, setAutoGradeResult] = useState(null);
 
   // Charger les sessions depuis la base de données
   const fetchSessions = async () => {
@@ -88,27 +88,7 @@ export default function TeacherDashboard() {
     }
   };
 
-  // Charger la banque de questions
-  const fetchQBank = async () => {
-    const teacherId = sessionStorage.getItem('teacher_id') || 1;
-    try {
-      if (window.electronAPI) {
-        const res = await window.electronAPI.getQuestionBank(teacherId);
-        if (res.success) setQBankQuestions(res.questions);
-      } else {
-        const res = await fetch(`http://localhost:3000/api/questionbank?teacherId=${teacherId}`);
-        const data = await res.json();
-        if (data.success) setQBankQuestions(data.questions);
-      }
-    } catch (err) {
-      console.error("Erreur de chargement de la banque de questions:", err);
-      // Mode démo locale
-      setQBankQuestions([
-        { id: 1, enonce: "Définir la différence entre une interface et une classe abstraite.", typeReponse: 'texte', points: 4 },
-        { id: 2, enonce: "Implémenter l'algorithme du Tri Rapide (QuickSort) en Java.", typeReponse: 'code', points: 8 }
-      ]);
-    }
-  };
+
 
   // Charger les résultats pour la session sélectionnée
   const fetchSessionResults = async (sessionId) => {
@@ -152,7 +132,6 @@ export default function TeacherDashboard() {
 
   useEffect(() => {
     fetchSessions();
-    fetchQBank();
   }, []);
 
   const handleLogout = () => { sessionStorage.clear(); navigate('/'); };
@@ -168,7 +147,7 @@ export default function TeacherDashboard() {
       title: '',
       date: new Date().toISOString().split('T')[0],
       heureDebut: '08:00',
-      heureFin: '11:00',
+      duree: 120,
       code: generateCode()
     });
     setShowNewModal(true);
@@ -178,16 +157,11 @@ export default function TeacherDashboard() {
     e.preventDefault();
     setError('');
 
-    // Calculer la durée en minutes entre début et fin
-    const startParts = newSession.heureDebut.split(':').map(Number);
-    const endParts = newSession.heureFin.split(':').map(Number);
-    const durMin = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
-
     const sessionData = {
       title: newSession.title,
       date: `${newSession.date} ${newSession.heureDebut}`,
       code: newSession.code,
-      duree: durMin > 0 ? durMin : 120,
+      duree: Number(newSession.duree) || 120,
       instructions: 'Veuillez composer seul et sans sortir du mode Kiosque.',
       teacherId: sessionStorage.getItem('teacher_id')
     };
@@ -353,51 +327,7 @@ export default function TeacherDashboard() {
     fetchSessions();
   };
 
-  // Question Bank handlers
-  const handleSaveQBankQuestion = async (e) => {
-    e.preventDefault();
-    if (!newQBankQuestion.enonce.trim()) return;
-    const teacherId = sessionStorage.getItem('teacher_id') || 1;
 
-    try {
-      if (window.electronAPI) {
-        const res = await window.electronAPI.addQuestionBank(teacherId, newQBankQuestion);
-        if (res.success) {
-          fetchQBank();
-          setShowQBankModal(false);
-          setNewQBankQuestion({ enonce: '', typeReponse: 'texte', points: 1 });
-        }
-      } else {
-        const res = await fetch('http://localhost:3000/api/questionbank', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ teacherId, ...newQBankQuestion })
-        });
-        const data = await res.json();
-        if (data.success) {
-          fetchQBank();
-          setShowQBankModal(false);
-          setNewQBankQuestion({ enonce: '', typeReponse: 'texte', points: 1 });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDeleteQBankQuestion = async (id) => {
-    if (!confirm(t('qbankDeleteConfirm'))) return;
-    try {
-      if (window.electronAPI) {
-        await window.electronAPI.deleteQuestionBank(id);
-      } else {
-        await fetch(`http://localhost:3000/api/questionbank/${id}`, { method: 'DELETE' });
-      }
-      fetchQBank();
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   // Results / Grading handlers
   const handleOpenGradingModal = (copie) => {
@@ -447,7 +377,7 @@ export default function TeacherDashboard() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ notesJSON: currentGrades, noteFinale: finalScore, commentaire: currentComment })
         });
-        const data = await response.json();
+        const data = await res.json();
         if (data.success) {
           setSuccess(t('gradingSaved'));
           setShowGradingModal(false);
@@ -463,6 +393,7 @@ export default function TeacherDashboard() {
       setShowGradingModal(false);
     }
   };
+
 
   const handleExportResults = () => {
     if (sessionResults.length === 0) return;
@@ -502,9 +433,7 @@ export default function TeacherDashboard() {
           <a href="#" className={`nav-link ${activeTab === 'sessions' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('sessions'); }}>
             {t('tabSessions')}
           </a>
-          <a href="#" className={`nav-link ${activeTab === 'qbank' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('qbank'); }}>
-            {t('tabQuestionBank')}
-          </a>
+
           <a href="#" className={`nav-link ${activeTab === 'results' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setActiveTab('results'); }}>
             {t('tabResults')}
           </a>
@@ -612,21 +541,15 @@ export default function TeacherDashboard() {
                   return (
                     <div key={session.id} className="glass-card session-card">
                       <div className={`session-card-accent ${session.status}`} />
-                      <div className="session-card-body">
-                        <div className="session-info">
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
-                            <h3 style={{ margin: 0 }}>
-                              {session.title}
-                              <span className={`badge ${
-                                session.status === 'active' ? 'badge-green' : session.status === 'closed' ? 'badge-yellow' : 'badge-blue'
-                              }`} style={{ marginLeft: 8 }}>
-                                {session.status === 'active' ? t('statusActive') : session.status === 'closed' ? t('statusClosed') : t('statusPending')}
-                              </span>
-                            </h3>
-                            <div className="session-code-badge" title={t('sessionCodeTooltip')}>
-                              {session.code}
-                            </div>
-                          </div>
+                      <div className="session-card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+                        <div className="session-info" style={{ flex: 1, minWidth: 300 }}>
+                          <h3 style={{ margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {session.title}
+                            <span className={`status-badge ${session.status}`}>
+                              <span className="status-dot" />
+                              {session.status === 'active' ? t('statusActive') : session.status === 'closed' ? t('statusClosed') : t('statusPending')}
+                            </span>
+                          </h3>
 
                           <div className="session-meta">
                             <span className="session-meta-item">
@@ -638,8 +561,10 @@ export default function TeacherDashboard() {
                             {session.enonceTexte && (() => {
                               try { return JSON.parse(session.enonceTexte).length > 0; } catch { return false; }
                             })() && (
-                              <span className="session-meta-item" style={{ borderColor: 'rgba(99,102,241,0.3)', color: 'var(--accent-light)' }}>
-                                ❓ {(() => { try { return JSON.parse(session.enonceTexte).length; } catch { return 0; }})()} {t('qbankQuestionLabel').toLowerCase()}(s)
+                              <span className="session-meta-item" style={{ borderColor: 'rgba(99,102,241,0.3)' }}>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                  ❓ {(() => { try { return JSON.parse(session.enonceTexte).length; } catch { return 0; }})()} question(s)
+                                </span>
                               </span>
                             )}
                             {session.sujetPdfBase64 && (
@@ -650,7 +575,10 @@ export default function TeacherDashboard() {
                           </div>
                         </div>
 
-                        <div className="session-actions">
+                        <div className="session-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div className="session-code-badge" title={t('sessionCodeTooltip')} style={{ margin: 0 }}>
+                            {session.code}
+                          </div>
                           <button
                             className="btn btn-ghost btn-sm"
                             onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title } })}
@@ -674,57 +602,7 @@ export default function TeacherDashboard() {
           </div>
         )}
 
-        {/* ─── TAB BANQUE DE QUESTIONS ────────────────────────────────────── */}
-        {activeTab === 'qbank' && (
-          <div className="animate-fade-up">
-            <div className="page-header">
-              <h1>📂 {t('qbankTitle')}</h1>
-              <p>{t('qbankDesc')}</p>
-            </div>
 
-            <div className="section-header">
-              <h2>❓ {t('qbankTitle')}</h2>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowQBankModal(true)}>
-                {t('qbankAddBtn')}
-              </button>
-            </div>
-
-            {qBankQuestions.length === 0 ? (
-              <div className="glass-card empty-state">
-                <div className="empty-icon">❓</div>
-                <p>{t('qbankNoQuestions')}</p>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-                {qBankQuestions.map(q => (
-                  <div key={q.id} className="glass-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <span className={`badge ${
-                          q.typeReponse === 'code' ? 'badge-green' : q.typeReponse === 'uml' ? 'badge-blue' : 'badge-yellow'
-                        }`}>
-                          {q.typeReponse === 'code' ? t('qbankTypeCode') : q.typeReponse === 'uml' ? t('qbankTypeUml') : t('qbankTypeTexte')}
-                        </span>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--accent-light)' }}>
-                          {q.points} pt{q.points > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                      <p style={{ fontSize: '0.95rem', color: 'var(--text-primary)', marginBottom: 20, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                        {q.enonce}
-                      </p>
-                    </div>
-                    <div style={{ textAlign: 'right', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.2)' }}
-                        onClick={() => handleDeleteQBankQuestion(q.id)}>
-                        ✕ {t('close')}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ─── TAB CORRECTIONS & RESULTATS ───────────────────────────────── */}
         {activeTab === 'results' && (
@@ -793,11 +671,11 @@ export default function TeacherDashboard() {
                               <td style={{ padding: 12 }}>{res.prenom} {res.nom}</td>
                               <td style={{ padding: 12 }}>
                                 {res.estValidee === 1 ? (
-                                  <span style={{ color: 'var(--success)' }}>{t('resultsStatusSubmitted')}</span>
+                                  <span className="status-badge submitted"><span className="status-dot" />{t('resultsStatusSubmitted')}</span>
                                 ) : isClosed ? (
-                                  <span style={{ color: 'var(--warning)' }}>{t('resultsStatusFinishedTime')}</span>
+                                  <span className="status-badge timeout"><span className="status-dot" />{t('resultsStatusFinishedTime')}</span>
                                 ) : (
-                                  <span style={{ color: 'var(--accent-light)' }}>{t('resultsStatusInProgress')}</span>
+                                  <span className="status-badge inprogress"><span className="status-dot" />{t('resultsStatusInProgress')}</span>
                                 )}
                               </td>
                               <td style={{ padding: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
@@ -860,9 +738,9 @@ export default function TeacherDashboard() {
                     value={newSession.heureDebut} onChange={e => setNewSession({...newSession, heureDebut: e.target.value})} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">{t('endTimeLabel')}</label>
-                  <input className="form-input" type="time" required
-                    value={newSession.heureFin} onChange={e => setNewSession({...newSession, heureFin: e.target.value})} />
+                  <label className="form-label">{t('createExamDurationLabel') || 'Durée (minutes)'}</label>
+                  <input className="form-input" type="number" min="15" required
+                    value={newSession.duree} onChange={e => setNewSession({...newSession, duree: e.target.value})} />
                 </div>
               </div>
               <div className="form-group">
@@ -965,10 +843,11 @@ export default function TeacherDashboard() {
                         <td style={{ padding: 10, color: 'var(--text-secondary)' }}>{st.email}</td>
                         <td style={{ padding: 10, textAlign: 'center', fontFamily: 'Fira Code', color: 'var(--accent-light)' }}>{st.codeSecret}</td>
                         <td style={{ padding: 10, textAlign: 'right', fontWeight: 'bold' }}>
-                          <span style={{ 
-                            color: st.statusEmail.includes('✅') || st.statusEmail === 'Envoyé' ? 'var(--success)' : 
-                                   st.statusEmail === 'Prêt' ? 'var(--text-secondary)' : 'var(--warning)' 
-                          }}>
+                          <span className={`status-badge ${
+                            st.statusEmail.includes('✅') || st.statusEmail === 'Envoyé' ? 'email-sent' : 
+                            st.statusEmail === 'Prêt' ? 'email-ready' : 'email-progress'
+                          }`}>
+                            <span className="status-dot" />
                             {st.statusEmail}
                           </span>
                         </td>
@@ -988,42 +867,7 @@ export default function TeacherDashboard() {
         </div>
       )}
 
-      {/* ─── MODAL NOUVELLE QUESTION BANQUE ────────────────────────────── */}
-      {showQBankModal && (
-        <div className="modal-overlay" onClick={() => setShowQBankModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>❓ {t('qbankAddBtn')}</h2>
-            <p>{t('qbankStatementPlaceholder')}</p>
-            <form onSubmit={handleSaveQBankQuestion} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="form-group">
-                <label className="form-label">{t('qbankStatementPlaceholder')}</label>
-                <textarea className="form-textarea" required rows={4}
-                  value={newQBankQuestion.enonce} onChange={e => setNewQBankQuestion({...newQBankQuestion, enonce: e.target.value})} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">{t('qbankTypeLabel')}</label>
-                  <select className="form-select" value={newQBankQuestion.typeReponse}
-                    onChange={e => setNewQBankQuestion({...newQBankQuestion, typeReponse: e.target.value})}>
-                    <option value="texte">{t('qbankTypeTexte')}</option>
-                    <option value="code">{t('qbankTypeCode')}</option>
-                    <option value="uml">{t('qbankTypeUml')}</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">{t('qbankPointsLabel')}</label>
-                  <input className="form-input" type="number" min="1" required
-                    value={newQBankQuestion.points} onChange={e => setNewQBankQuestion({...newQBankQuestion, points: Number(e.target.value)})} />
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowQBankModal(false)}>{t('cancel')}</button>
-                <button type="submit" className="btn btn-primary">✨ {t('save')}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
 
       {/* ─── MODAL CORRECTION / GRADING ───────────────────────────────── */}
       {showGradingModal && activeCopie && (() => {
@@ -1036,23 +880,50 @@ export default function TeacherDashboard() {
         } catch (e) {
           studentAnswers = {};
         }
+
+        const examQsToDisplay = [...examQs];
+        Object.keys(studentAnswers).forEach((key) => {
+          if (!examQsToDisplay.find(q => q.id.toString() === key.toString())) {
+            examQsToDisplay.push({
+              id: key,
+              enonce: 'Réponse libre ajoutée par l\'étudiant',
+              typeReponse: studentAnswers[key]?.type || 'texte',
+              points: 0
+            });
+          }
+        });
         
         return (
           <div className="modal-overlay" onClick={() => setShowGradingModal(false)}>
             <div className="modal" style={{ maxWidth: '900px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
               <h2>{t('gradingTitle')}{activeCopie.prenom} {activeCopie.nom}</h2>
-              <p style={{ marginBottom: 12 }}>Matricule: {activeCopie.matricule} • {t('gradingCopieStatus')}: {activeCopie.estValidee ? 'Validée' : 'Temps écoulé'}</p>
+              <p style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                Matricule: <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>{activeCopie.matricule}</span> 
+                <span style={{ color: 'var(--text-muted)' }}>•</span> 
+                {t('gradingCopieStatus')}: 
+                {activeCopie.estValidee ? (
+                  <span className="status-badge submitted"><span className="status-dot" />{t('resultsStatusSubmitted')}</span>
+                ) : (
+                  <span className="status-badge timeout"><span className="status-dot" />{t('resultsStatusFinishedTime')}</span>
+                )}
+              </p>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20, margin: '20px 0' }}>
-                {examQs.map((q, idx) => {
-                  const answer = studentAnswers[q.id] || '';
+                {examQsToDisplay.map((q, idx) => {
+                  const answerObj = studentAnswers[q.id] || {};
+                  const answerType = answerObj.type || q.typeReponse || 'texte'; // fallback s'il y a un type hérité
+                  const answerContent = answerObj.content !== undefined ? answerObj.content : (typeof studentAnswers[q.id] === 'string' ? studentAnswers[q.id] : '');
+                  
                   const score = currentGrades[q.id] || 0;
                   return (
                     <div key={q.id} style={{ padding: 16, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <h4 style={{ margin: 0, color: 'var(--accent-light)' }}>Question {idx + 1} ({q.points} pt{q.points > 1 ? 's' : ''})</h4>
+                        <h4 style={{ margin: 0, color: 'var(--accent-light)' }}>
+                          {answerType === 'code' ? '💻 ' : answerType === 'uml' ? '📐 ' : '📝 '}
+                          Question {idx + 1} ({q.points} pt{q.points > 1 ? 's' : ''})
+                        </h4>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{t('qbankPointsLabel')} :</label>
+                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{t('gradingQuestionPoints')}</label>
                           <input type="number" min="0" max={q.points} step="0.5" className="form-input" style={{ width: 80, padding: '6px 10px' }}
                             value={score} onChange={e => handleUpdateQuestionGrade(q.id, e.target.value)} />
                         </div>
@@ -1061,20 +932,25 @@ export default function TeacherDashboard() {
                         {q.enonce}
                       </p>
                       <div style={{ background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6, border: '1px solid var(--border)' }}>
-                        {q.typeReponse === 'code' ? (
+                        {answerType === 'code' ? (
                           <pre style={{ margin: 0, fontFamily: 'Fira Code, monospace', fontSize: '0.85rem', color: '#c4b5fd', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
-                            {answer || '// Aucune réponse fournie'}
+                            {answerContent || '// Aucune réponse fournie'}
                           </pre>
-                        ) : q.typeReponse === 'uml' ? (
-                          <div>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>📐 Description UML :</span>
-                            <pre style={{ margin: 0, fontFamily: 'Fira Code, monospace', fontSize: '0.85rem', color: '#67e8f9', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
-                              {answer || '// Aucune réponse fournie'}
-                            </pre>
+                        ) : answerType === 'uml' ? (
+                          <div style={{ minHeight: 320 }}>
+                            {answerContent ? (
+                              <UMLEditor
+                                value={answerContent}
+                                onChange={() => {}}
+                                readOnly={true}
+                              />
+                            ) : (
+                              <p style={{ color: 'var(--text-muted)', fontStyle: 'italic', padding: 16 }}>Aucun diagramme UML fourni.</p>
+                            )}
                           </div>
                         ) : (
                           <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>
-                            {answer || '(Aucune réponse fournie)'}
+                            {answerContent || '(Aucune réponse fournie)'}
                           </p>
                         )}
                       </div>

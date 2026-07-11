@@ -8,7 +8,7 @@ const TYPE_CONFIG = {
   uml:   { label: 'UML',   icon: '📐', btnClass: 'active-uml' },
 };
 
-const emptyQuestion = () => ({ id: Date.now(), enonce: '', typeReponse: 'texte', points: 1 });
+const emptyQuestion = () => ({ id: Date.now(), enonce: '', typeReponse: 'texte', points: 1, testCases: [] });
 
 export default function CreateExam() {
   const navigate = useNavigate();
@@ -17,10 +17,13 @@ export default function CreateExam() {
   const { sessionId = null, sessionTitle = 'Nouvelle épreuve' } = location.state || {};
 
   const [questions, setQuestions] = useState([emptyQuestion()]);
+  const [isFinished, setIsFinished] = useState(false);
   const [examInfo, setExamInfo] = useState({
     titre: sessionTitle,
     instructions: '',
     dureeMinutes: 120,
+    examDate: '',
+    examTime: '',
     langageCible: 'Java',
     sujetPdfBase64: null,
     sujetPdfName: ''
@@ -29,9 +32,7 @@ export default function CreateExam() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Banque de questions states
-  const [qBank, setQBank] = useState([]);
-  const [showQBankModal, setShowQBankModal] = useState(false);
+
 
   // Charger les données de l'épreuve existante
   useEffect(() => {
@@ -53,10 +54,23 @@ export default function CreateExam() {
         }
         
         if (ex) {
+          const dateParts = ex.date ? ex.date.split(' ') : [];
+          const sessionDate = dateParts[0] || '';
+          const sessionTime = dateParts[1] || '';
+          const duration = ex.duree || 120;
+          
+          if (sessionDate && sessionTime) {
+            const end = new Date(`${sessionDate}T${sessionTime}`);
+            end.setMinutes(end.getMinutes() + duration);
+            setIsFinished(new Date() > end);
+          }
+
           setExamInfo({
             titre: ex.title || sessionTitle,
             instructions: ex.instructions || '',
-            dureeMinutes: ex.duree || 120,
+            dureeMinutes: duration,
+            examDate: sessionDate,
+            examTime: sessionTime,
             langageCible: ex.langageCible || 'Java',
             sujetPdfBase64: ex.sujetPdfBase64 || null,
             sujetPdfName: ex.sujetPdfBase64 ? 'Sujet Examen.pdf' : ''
@@ -77,29 +91,7 @@ export default function CreateExam() {
     load();
   }, [sessionId]);
 
-  // Charger la banque de questions de l'enseignant
-  useEffect(() => {
-    const fetchQBank = async () => {
-      const teacherId = sessionStorage.getItem('teacher_id') || 1;
-      try {
-        if (window.electronAPI) {
-          const res = await window.electronAPI.getQuestionBank(teacherId);
-          if (res.success) setQBank(res.questions);
-        } else {
-          const res = await fetch(`http://localhost:3000/api/questionbank?teacherId=${teacherId}`);
-          const data = await res.json();
-          if (data.success) setQBank(data.questions);
-        }
-      } catch (err) {
-        console.error(err);
-        setQBank([
-          { id: 1, enonce: "Expliquez le concept d'encapsulation en POO.", typeReponse: 'texte', points: 3 },
-          { id: 2, enonce: "Écrire une fonction qui vérifie si une chaîne est un palindrome.", typeReponse: 'code', points: 5 }
-        ]);
-      }
-    };
-    fetchQBank();
-  }, []);
+
 
   const addQuestion = () => setQuestions(prev => [...prev, { ...emptyQuestion(), id: Date.now() }]);
 
@@ -109,14 +101,7 @@ export default function CreateExam() {
   const deleteQuestion = (id) =>
     setQuestions(prev => prev.filter(q => q.id !== id));
 
-  const handleImportQuestion = (qBankItem) => {
-    setQuestions(prev => [...prev, {
-      id: Date.now() + Math.random(),
-      enonce: qBankItem.enonce,
-      typeReponse: qBankItem.typeReponse,
-      points: qBankItem.points
-    }]);
-  };
+
 
   // Gestion du PDF
   const handlePdfUpload = (e) => {
@@ -141,6 +126,7 @@ export default function CreateExam() {
     const examData = {
       title: examInfo.titre,
       duree: parseInt(examInfo.dureeMinutes) || 120,
+      dateHeureDebut: examInfo.examDate && examInfo.examTime ? `${examInfo.examDate} ${examInfo.examTime}` : undefined,
       instructions: examInfo.instructions,
       langageCible: examInfo.langageCible,
       sujetPdfBase64: examInfo.sujetPdfBase64,
@@ -184,9 +170,15 @@ export default function CreateExam() {
         </button>
         <div className="topbar-logo"><span>✏️ {t('createExamTitle')}</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary btn-sm" onClick={handleSave}>
-            {saved ? `✅ ${t('createExamPublished')}` : `💾 ${t('createExamPublish')}`}
-          </button>
+          {!isFinished ? (
+            <button className="btn btn-primary btn-sm" onClick={handleSave}>
+              {saved ? `✅ ${t('createExamPublished')}` : `💾 ${t('createExamPublish')}`}
+            </button>
+          ) : (
+            <div style={{ color: '#ef4444', padding: '6px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 4, fontSize: '0.85rem', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>
+              🔒 Épreuve terminée (Lecture seule)
+            </div>
+          )}
         </div>
       </header>
 
@@ -200,49 +192,57 @@ export default function CreateExam() {
         {/* Infos générales */}
         <div className="glass-card" style={{ padding: 28, marginBottom: 24 }}>
           <h2 style={{ marginBottom: 20, fontSize: '1.1rem', fontWeight: 600 }}>📄 {t('createExamInfoTitle')}</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 16 }}>
             <div className="form-group">
               <label className="form-label">{t('createExamTitreLabel')}</label>
               <input className="form-input" value={examInfo.titre}
                 onChange={e => setExamInfo({...examInfo, titre: e.target.value})}
-                placeholder="ex: Examen Final" />
+                placeholder="ex: Examen Final" disabled={isFinished} />
             </div>
             <div className="form-group">
-              <label className="form-label">{t('createExamLangLabel')}</label>
-              <select className="form-select" value={examInfo.langageCible}
-                onChange={e => setExamInfo({...examInfo, langageCible: e.target.value})}>
-                <option>Java</option><option>Python</option><option>C</option>
-                <option>C++</option><option>JavaScript</option><option>SQL</option>
-              </select>
+              <label className="form-label">{t('dateLabel')}</label>
+              <input className="form-input" type="date" value={examInfo.examDate || ''}
+                onChange={e => setExamInfo({...examInfo, examDate: e.target.value})} disabled={isFinished} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t('startTimeLabel')}</label>
+              <input className="form-input" type="time" value={examInfo.examTime || ''}
+                onChange={e => setExamInfo({...examInfo, examTime: e.target.value})} disabled={isFinished} />
             </div>
             <div className="form-group">
               <label className="form-label">{t('createExamDurationLabel')}</label>
               <input className="form-input" type="number" value={examInfo.dureeMinutes} min={15}
-                onChange={e => setExamInfo({...examInfo, dureeMinutes: e.target.value})} />
+                onChange={e => setExamInfo({...examInfo, dureeMinutes: e.target.value})} disabled={isFinished} />
             </div>
           </div>
           <div className="form-group" style={{ marginTop: 16 }}>
-            <label className="form-label">{t('createExamInstructionsLabel')}</label>
-            <textarea className="form-textarea"
-              placeholder={t('createExamInstructionsPlaceholder')}
+            <label className="form-label" style={{ fontWeight: 600, color: 'var(--accent-light)' }}>Sujet / Contexte Global de l'Épreuve</label>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 8 }}>
+              Saisissez ici le contexte général, l'énoncé principal ou le scénario qui s'applique à toute l'épreuve.
+            </p>
+            <textarea className="form-textarea" rows={6}
+              placeholder="Ex: Le but de cet exercice est de concevoir le système d'information de l'entreprise..."
               value={examInfo.instructions}
-              onChange={e => setExamInfo({...examInfo, instructions: e.target.value})} />
+              onChange={e => setExamInfo({...examInfo, instructions: e.target.value})} disabled={isFinished} />
           </div>
         </div>
 
         {/* Upload du sujet PDF */}
         <div className="glass-card" style={{ padding: 28, marginBottom: 24 }}>
           <h2 style={{ marginBottom: 10, fontSize: '1.1rem', fontWeight: 600 }}>📎 {t('createExamPdfTitle')}</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
             {t('createExamPdfDesc')}
           </p>
+          <div style={{ padding: '10px 14px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 8, color: '#60a5fa', fontSize: '0.85rem', marginBottom: 20 }}>
+            💡 <strong>Note :</strong> Si vous fournissez uniquement un fichier PDF, assurez-vous d'ajouter au moins une <strong>Question</strong> (ex: "Réponse Globale") en bas de page pour que l'étudiant ait un espace de saisie.
+          </div>
 
           {!examInfo.sujetPdfBase64 ? (
-            <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius)', padding: '40px 20px', textAlign: 'center', cursor: 'pointer', background: 'rgba(255,255,255,0.01)', transition: 'all 0.2s', position: 'relative' }}
-              onMouseOver={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+            <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius)', padding: '40px 20px', textAlign: 'center', cursor: isFinished ? 'not-allowed' : 'pointer', background: 'rgba(255,255,255,0.01)', transition: 'all 0.2s', position: 'relative' }}
+              onMouseOver={e => !isFinished && (e.currentTarget.style.borderColor = 'var(--accent)')}
               onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-              <input type="file" accept="application/pdf" onChange={handlePdfUpload}
-                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
+              <input type="file" accept="application/pdf" onChange={handlePdfUpload} disabled={isFinished}
+                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: isFinished ? 'not-allowed' : 'pointer' }} />
               <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: 12 }}>📥</span>
               <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 4 }}>{t('createExamPdfPlaceholder')}</p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>PDF (Max: 5 Mo)</p>
@@ -254,11 +254,15 @@ export default function CreateExam() {
                 <div>
                   <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{examInfo.sujetPdfName || 'Sujet Examen.pdf'}</p>
                   <p style={{ fontSize: '0.75rem', color: 'var(--success)' }}>✅ {t('createExamPdfSuccess')}</p>
+                  {!isFinished && (
+                    <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                      <button className="btn btn-ghost btn-sm" onClick={removePdf} style={{ color: 'var(--danger)', padding: 0 }}>
+                        ✕ Supprimer
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={removePdf} style={{ color: 'var(--danger)', border: 'none' }}>
-                ✕ {t('close')}
-              </button>
             </div>
           )}
         </div>
@@ -266,14 +270,13 @@ export default function CreateExam() {
         {/* Questions */}
         <div className="section-header">
           <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>❓ {t('createExamQuestionsTitle')} ({questions.length})</h2>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowQBankModal(true)}>
-              📥 Importer de la banque
-            </button>
-            <button id="btn-add-question" className="btn btn-primary btn-sm" onClick={addQuestion}>
-              {t('createExamAddQ')}
-            </button>
-          </div>
+          {!isFinished && (
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button id="btn-add-question" className="btn btn-primary btn-sm" onClick={addQuestion}>
+                {t('createExamAddQ')}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="question-builder">
@@ -282,42 +285,28 @@ export default function CreateExam() {
               <div className="q-header">
                 <div className="q-number">Q{index + 1}</div>
                 <div style={{ flex: 1, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                  {t('qbankTypeLabel')} :
-                  <div className="q-type-selector">
-                    {Object.entries(TYPE_CONFIG).map(([type, cfg]) => (
-                      <button
-                        key={type}
-                        className={`q-type-btn ${q.typeReponse === type ? cfg.btnClass : ''}`}
-                        onClick={() => updateQuestion(q.id, 'typeReponse', type)}
-                        type="button"
-                      >
-                        {cfg.icon} {cfg.label}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Le type de réponse sera choisi par l'étudiant */}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <label className="form-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>{t('createExamPoints')}</label>
                   <input type="number" min="1" className="form-input" style={{ width: 70 }}
-                    value={q.points} onChange={e => updateQuestion(q.id, 'points', e.target.value)} />
+                    value={q.points} onChange={e => updateQuestion(q.id, 'points', e.target.value)} disabled={isFinished} />
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">{t('qbankStatementPlaceholder')}</label>
+                <label className="form-label">{t('createExamStatementPlaceholder')}</label>
                 <textarea className="form-textarea" rows={4}
                   placeholder={`${t('createExamStatementPlaceholder')} ${index + 1}...`}
                   value={q.enonce}
-                  onChange={e => updateQuestion(q.id, 'enonce', e.target.value)} />
+                  onChange={e => updateQuestion(q.id, 'enonce', e.target.value)} disabled={isFinished} />
               </div>
 
-              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                {q.typeReponse === 'texte' && '📝 L\'étudiant répondra par un texte libre.'}
-                {q.typeReponse === 'code' && `💻 L'étudiant répondra avec un éditeur de code (${examInfo.langageCible}) avec coloration syntaxique.`}
-                {q.typeReponse === 'uml' && '📐 L\'étudiant répondra en concevant un diagramme UML.'}
-              </div>
 
-              {questions.length > 1 && (
+
+
+
+              {!isFinished && questions.length > 1 && (
                 <div className="q-delete">
                   <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', padding: '4px 10px' }}
                     onClick={() => deleteQuestion(q.id)} type="button">
@@ -336,42 +325,7 @@ export default function CreateExam() {
         </div>
       </div>
 
-      {/* Modal Import Question Bank */}
-      {showQBankModal && (
-        <div className="modal-overlay" onClick={() => setShowQBankModal(false)}>
-          <div className="modal" style={{ maxWidth: '600px', width: '90%' }} onClick={e => e.stopPropagation()}>
-            <h2>📥 Importer de la Banque de Questions</h2>
-            <p>Sélectionnez une question pour l'ajouter à l'épreuve.</p>
-            
-            <div style={{ maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, margin: '20px 0' }}>
-              {qBank.length === 0 ? (
-                <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Aucune question disponible dans la banque.</p>
-              ) : (
-                qBank.map(item => (
-                  <div key={item.id} style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ flex: 1, marginRight: 16 }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                        <span className="badge badge-blue">{item.typeReponse.toUpperCase()}</span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--accent-light)' }}>{item.points} pts</span>
-                      </div>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0 }}>{item.enonce}</p>
-                    </div>
-                    <button className="btn btn-primary btn-sm" onClick={() => handleImportQuestion(item)}>
-                      +
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-            
-            <div className="modal-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowQBankModal(false)}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }
