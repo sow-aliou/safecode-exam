@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteQuestionBank: (questionId) => ipcRenderer.invoke('delete-question-bank', questionId),
   getSessionResults: (sessionId) => ipcRenderer.invoke('get-session-results', sessionId),
   saveGrade: (copieId, notesJSON, noteFinale, commentaire) => ipcRenderer.invoke('save-grade', copieId, notesJSON, noteFinale, commentaire),
+  sendEmail: (studentData, sessionCode) => ipcRenderer.invoke('send-email', studentData, sessionCode),
 });

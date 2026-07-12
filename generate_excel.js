@@ -3,7 +3,7 @@ import fs from 'fs';
 
 // 1. Liste des étudiants
 const students = [
-  { matricule: 'ETU001', nom: 'Diop', prenom: 'Moussa', email: 'moussa.diop@example.com' },
+  { matricule: 'ETU001', nom: 'Sow', prenom: 'Seydina Aliou', email: 'seydinaaliousow80@gmail.com' },
   { matricule: 'ETU002', nom: 'Sarr', prenom: 'Aminata', email: 'aminata.sarr@example.com' },
   { matricule: 'ETU003', nom: 'Ndiaye', prenom: 'Cheikh', email: 'cheikh.ndiaye@example.com' },
   { matricule: 'ETU004', nom: 'Fall', prenom: 'Fatou', email: 'fatou.fall@example.com' }

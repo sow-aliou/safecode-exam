@@ -1,13 +1,24 @@
 import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { 
-  saveCodeToDb, 
-  getSessionsFromDb, 
-  createSessionInDb, 
-  updateSessionExamInDb, 
-  importStudentsToDb, 
-  getStudentsForSessionFromDb, 
+import nodemailer from 'nodemailer';
+
+// Configuration du transporteur SMTP Gmail
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'sow8.aliou@gmail.com',
+    pass: 'irpjmzqmxcxgnmxm ' 
+  }
+});
+
+import {
+  saveCodeToDb,
+  getSessionsFromDb,
+  createSessionInDb,
+  updateSessionExamInDb,
+  importStudentsToDb,
+  getStudentsForSessionFromDb,
   studentLoginCheck,
   getQuestionBankFromDb,
   addQuestionToBankInDb,
@@ -43,7 +54,7 @@ function createWindow() {
 
   // Si on est en dev (Vite par défaut sur 5174)
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5174');
     mainWindow.webContents.openDevTools();
@@ -125,10 +136,10 @@ app.whenReady().then(() => {
 
       // 2. Enregistrement local SQLite
       const localResult = await createSessionInDb(sessionData);
-      return { 
-        success: true, 
+      return {
+        success: true,
         sessionId: serverSessionId || localResult.sessionId,
-        localOnly: !serverSessionId 
+        localOnly: !serverSessionId
       };
     } catch (error) {
       console.error("Erreur create-session:", error);
@@ -166,21 +177,25 @@ app.whenReady().then(() => {
 
       // 1. Envoyer au serveur central
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 seconds timeout
         const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/students`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ students })
+          body: JSON.stringify({ students }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         const data = await response.json();
         serverSuccess = data.success;
       } catch (err) {
-        console.log("Erreur connexion serveur pour l'import d'étudiants.");
+        console.log("Erreur connexion serveur pour l'import d'étudiants (Ignoré) :", err.message);
       }
 
       // 2. Enregistrer localement
       const localResult = await importStudentsToDb(sessionId, students);
-      return { 
-        success: true, 
+      return {
+        success: true,
         count: localResult.count,
         serverSynced: serverSuccess
       };
@@ -231,9 +246,9 @@ app.whenReady().then(() => {
             email: '', // optionnel
             codeSecret: password
           };
-          
+
           await importStudentsToDb(data.user.sessionId, [studentObj]);
-          
+
           return data;
         }
       } catch (err) {
@@ -341,6 +356,45 @@ app.whenReady().then(() => {
       const localResult = await saveGradeToDb(copieId, notesJSON, noteFinale, commentaire);
       return localResult;
     } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Envoi d'email via Nodemailer
+  ipcMain.handle('send-email', async (event, studentData, sessionCode) => {
+    try {
+      const { nom, prenom, email, matricule, codeSecret } = studentData;
+
+      const mailOptions = {
+        from: '"SafeCode Exam" <ton.email.prof@gmail.com>', // TODO: Correspondre avec l'adresse configurée en haut
+        to: email,
+        subject: `Vos identifiants d'examen SafeCode - Session ${sessionCode}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9f9f9; padding: 20px; border-radius: 10px; border: 1px solid #ddd;">
+            <h2 style="color: #10b981; text-align: center;">SafeCode - Accès à l'Examen</h2>
+            <p style="font-size: 16px; color: #333;">Bonjour <strong>${prenom} ${nom}</strong>,</p>
+            <p style="font-size: 15px; color: #444;">Vous êtes invité(e) à participer à une session d'examen sécurisée sur SafeCode. Voici vos identifiants personnels de connexion :</p>
+
+            <div style="background: #fff; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981; margin: 20px 0;">
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="margin-bottom: 10px;">👤 <strong>Numéro Étudiant :</strong> <span style="font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px;">${matricule}</span></li>
+                <li style="margin-bottom: 10px;">🔑 <strong>Code Secret :</strong> <span style="font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; color: #e11d48; font-weight: bold;">${codeSecret}</span></li>
+                <li>📝 <strong>Code de la Session :</strong> <span style="font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${sessionCode}</span></li>
+              </ul>
+            </div>
+
+            <p style="font-size: 14px; color: #666;"><em>Veuillez conserver ces informations en lieu sûr et ne pas les partager.</em></p>
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;" />
+            <p style="font-size: 12px; color: #999; text-align: center;">Ceci est un message automatique, merci de ne pas y répondre.</p>
+          </div>
+        `
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log('Message sent: %s', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error("Erreur lors de l'envoi de l'email:", error);
       return { success: false, error: error.message };
     }
   });

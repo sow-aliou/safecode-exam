@@ -21,13 +21,14 @@ export default function TeacherDashboard() {
   const teacherName = sessionStorage.getItem('teacher_name') || 'Enseignant';
 
   // Navigation tab state
-  const [activeTab, setActiveTab] = useState('sessions'); // 'sessions' | 'qbank' | 'results'
+  const [activeTab, setActiveTab] = useState('sessions'); // 'sessions' | 'results'
 
   // Sessions Tab States
   const [sessions, setSessions] = useState([]);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showStudentsModal, setShowStudentsModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('all');
   
   const [newSession, setNewSession] = useState({ title: '', date: '', heureDebut: '', duree: 120, code: '' });
   const [importedStudents, setImportedStudents] = useState([]);
@@ -36,6 +37,13 @@ export default function TeacherDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const showSuccessMessage = (msg) => {
+    setSuccess(msg);
+    setTimeout(() => {
+      setSuccess('');
+    }, 4000);
+  };
 
 
 
@@ -48,6 +56,7 @@ export default function TeacherDashboard() {
   const [currentComment, setCurrentComment] = useState('');
   const [isAutoGrading, setIsAutoGrading] = useState(false);
   const [autoGradeResult, setAutoGradeResult] = useState(null);
+  const [showPdfPanel, setShowPdfPanel] = useState(false);
 
   // Charger les sessions depuis la base de données
   const fetchSessions = async () => {
@@ -170,7 +179,7 @@ export default function TeacherDashboard() {
       try {
         const result = await window.electronAPI.createSession(sessionData);
         if (result.success) {
-          setSuccess(t('success'));
+          showSuccessMessage(t('success'));
           setShowNewModal(false);
           fetchSessions();
         } else {
@@ -189,7 +198,7 @@ export default function TeacherDashboard() {
         });
         const data = await response.json();
         if (data.success) {
-          setSuccess(t('success'));
+          showSuccessMessage(t('success'));
           setShowNewModal(false);
           fetchSessions();
         } else {
@@ -223,15 +232,12 @@ export default function TeacherDashboard() {
           const prenomKey = Object.keys(row).find(k => k.toLowerCase().includes('prenom') || k.toLowerCase().includes('prénom')) || 'prenom';
           const emailKey = Object.keys(row).find(k => k.toLowerCase().includes('mail') || k.toLowerCase().includes('email')) || 'email';
 
-          const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-          const uniquePass = Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-
           return {
             matricule: String(row[matriculeKey] || '').trim().toUpperCase(),
             nom: String(row[nomKey] || '').trim(),
             prenom: String(row[prenomKey] || '').trim(),
             email: String(row[emailKey] || '').trim(),
-            codeSecret: uniquePass,
+            codeSecret: '', // Généré à l'envoi
             statusEmail: 'Prêt'
           };
         }).filter(s => s.matricule && s.email);
@@ -240,7 +246,7 @@ export default function TeacherDashboard() {
           setError("Aucun étudiant valide. Le fichier doit avoir les colonnes matricule et email.");
         } else {
           setImportedStudents(students);
-          setSuccess(`${students.length} étudiants importés.`);
+          showSuccessMessage(`${students.length} étudiants importés.`);
         }
       } catch (err) {
         console.error(evt, err);
@@ -291,14 +297,24 @@ export default function TeacherDashboard() {
     setIsSendingEmails(true);
     setEmailStatusMessage(t('savingStudents'));
 
+    // Générer les codes secrets manquants
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const studentsWithCode = importedStudents.map(st => {
+      if (!st.codeSecret) {
+        return { ...st, codeSecret: Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join('') };
+      }
+      return st;
+    });
+    setImportedStudents(studentsWithCode);
+
     try {
       if (window.electronAPI && selectedSession) {
-        await window.electronAPI.importStudents(selectedSession.id, importedStudents);
+        await window.electronAPI.importStudents(selectedSession.id, studentsWithCode);
       } else if (selectedSession) {
         const response = await fetch(`http://localhost:3000/api/sessions/${selectedSession.id}/students`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ students: importedStudents })
+          body: JSON.stringify({ students: studentsWithCode })
         });
         const data = await response.json();
         if (!data.success) throw new Error(data.error);
@@ -310,15 +326,25 @@ export default function TeacherDashboard() {
       return;
     }
 
-    const progressList = [...importedStudents];
+    const progressList = [...studentsWithCode];
     for (let i = 0; i < progressList.length; i++) {
       progressList[i] = { ...progressList[i], statusEmail: 'En cours...' };
       setImportedStudents([...progressList]);
       setEmailStatusMessage(`${t('sendingTo')} ${progressList[i].email}...`);
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      if (window.electronAPI) {
+        const response = await window.electronAPI.sendEmail(progressList[i], selectedSession.code);
+        if (response.success) {
+          progressList[i] = { ...progressList[i], statusEmail: 'Envoyé ✅' };
+        } else {
+          progressList[i] = { ...progressList[i], statusEmail: 'Échec ❌' };
+          console.error("Erreur d'envoi:", response.error);
+        }
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        progressList[i] = { ...progressList[i], statusEmail: 'Envoyé ✅' };
+      }
 
-      progressList[i] = { ...progressList[i], statusEmail: 'Envoyé ✅' };
       setImportedStudents([...progressList]);
     }
 
@@ -367,7 +393,7 @@ export default function TeacherDashboard() {
       if (window.electronAPI) {
         const res = await window.electronAPI.saveGrade(activeCopie.copieId, currentGrades, finalScore, currentComment);
         if (res.success) {
-          setSuccess(t('gradingSaved'));
+          showSuccessMessage(t('gradingSaved'));
           setShowGradingModal(false);
           fetchSessionResults(selectedResultSession);
         }
@@ -379,7 +405,7 @@ export default function TeacherDashboard() {
         });
         const data = await res.json();
         if (data.success) {
-          setSuccess(t('gradingSaved'));
+          showSuccessMessage(t('gradingSaved'));
           setShowGradingModal(false);
           fetchSessionResults(selectedResultSession);
         }
@@ -389,7 +415,7 @@ export default function TeacherDashboard() {
       // SQLite local ou démo fallback
       const updated = sessionResults.map(r => r.copieId === activeCopie.copieId ? { ...r, notesJSON: JSON.stringify(currentGrades), noteFinale: finalScore, commentaire: currentComment } : r);
       setSessionResults(updated);
-      setSuccess(t('gradingSaved'));
+      showSuccessMessage(t('gradingSaved'));
       setShowGradingModal(false);
     }
   };
@@ -404,10 +430,7 @@ export default function TeacherDashboard() {
       return {
         [t('resultsTableMatricule')]: res.matricule,
         [t('resultsTableStudent')]: `${res.prenom} ${res.nom}`,
-        [t('tableEmail')]: res.email,
-        [t('resultsTableStatus')]: res.estValidee ? t('resultsStatusSubmitted') : t('resultsStatusFinishedTime'),
-        [t('resultsTableGrade')]: res.noteFinale !== null ? res.noteFinale : 'Non corrigé',
-        [t('gradingCommentLabel')]: res.commentaire || ''
+        [t('resultsTableGrade')]: res.noteFinale !== null ? res.noteFinale : 'Non corrigé'
       };
     });
 
@@ -523,22 +546,77 @@ export default function TeacherDashboard() {
               </div>
             </div>
 
-            <div className="section-header">
-              <h2>📋 {t('configuredSessions')}</h2>
-              <button id="btn-new-session" className="btn btn-primary btn-sm" onClick={handleOpenNewSessionModal}>
+            <div className="section-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <h2>📋 {t('configuredSessions')}</h2>
+                <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '12px' }}>
+                  <button 
+                    onClick={() => setFilterStatus('all')} 
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: filterStatus === 'all' ? 'rgba(255,255,255,0.1)' : 'transparent', color: filterStatus === 'all' ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' }}>
+                    Toutes
+                  </button>
+                  <button 
+                    onClick={() => setFilterStatus('active')} 
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: filterStatus === 'active' ? 'rgba(34,197,94,0.15)' : 'transparent', color: filterStatus === 'active' ? '#4ade80' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' }}>
+                    En cours
+                  </button>
+                  <button 
+                    onClick={() => setFilterStatus('pending')} 
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: filterStatus === 'pending' ? 'rgba(16,185,129,0.15)' : 'transparent', color: filterStatus === 'pending' ? 'var(--accent-light)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' }}>
+                    En attente
+                  </button>
+                  <button 
+                    onClick={() => setFilterStatus('closed')} 
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: filterStatus === 'closed' ? 'rgba(245,158,11,0.15)' : 'transparent', color: filterStatus === 'closed' ? '#fbbf24' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' }}>
+                    Terminées
+                  </button>
+                </div>
+              </div>
+              <button id="btn-new-session" className="btn btn-primary btn-sm" onClick={handleOpenNewSessionModal} style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-dark))', border: 'none', padding: '10px 16px', borderRadius: '10px', fontWeight: 700, color: '#fff', boxShadow: '0 4px 15px rgba(16,185,129,0.3)' }}>
                 {t('newSessionBtn')}
               </button>
             </div>
 
-            {sessions.length === 0 ? (
-              <div className="glass-card empty-state">
-                <div className="empty-icon">📋</div>
-                <p>{t('noSessions')}</p>
-              </div>
-            ) : (
-              <div className="sessions-list">
-                {sessions.map(session => {
-                  return (
+            {(() => {
+              if (sessions.length === 0) {
+                return (
+                  <div className="glass-card empty-state">
+                    <div className="empty-icon">📋</div>
+                    <p>{t('noSessions')}</p>
+                  </div>
+                );
+              }
+
+              const filteredSessions = [...sessions]
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .filter(session => filterStatus === 'all' ? true : session.status === filterStatus);
+
+              if (filteredSessions.length === 0) {
+                return (
+                  <div className="glass-card empty-state" style={{ padding: '60px 40px', textAlign: 'center', background: 'rgba(255,255,255,0.015)' }}>
+                    <div className="empty-icon" style={{ fontSize: '3rem', opacity: 0.5, marginBottom: '16px' }}>🔍</div>
+                    <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                      {lang === 'fr' ? 'Aucune session trouvée' : 'No sessions found'}
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)' }}>
+                      {lang === 'fr' 
+                        ? 'Aucune session ne correspond à ce filtre actuellement.' 
+                        : 'No sessions match this filter currently.'}
+                    </p>
+                    <button 
+                      onClick={() => setFilterStatus('all')} 
+                      className="btn btn-ghost" 
+                      style={{ marginTop: '24px', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 16px', borderRadius: '12px' }}
+                    >
+                      {lang === 'fr' ? 'Afficher toutes les sessions' : 'Show all sessions'}
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="sessions-list">
+                  {filteredSessions.map(session => (
                     <div key={session.id} className="glass-card session-card">
                       <div className={`session-card-accent ${session.status}`} />
                       <div className="session-card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
@@ -595,10 +673,10 @@ export default function TeacherDashboard() {
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -841,7 +919,7 @@ export default function TeacherDashboard() {
                         <td style={{ padding: 10, fontWeight: 'bold' }}>{st.matricule}</td>
                         <td style={{ padding: 10 }}>{st.prenom} {st.nom}</td>
                         <td style={{ padding: 10, color: 'var(--text-secondary)' }}>{st.email}</td>
-                        <td style={{ padding: 10, textAlign: 'center', fontFamily: 'Fira Code', color: 'var(--accent-light)' }}>{st.codeSecret}</td>
+                        <td style={{ padding: 10, textAlign: 'center', fontFamily: 'Fira Code', color: st.codeSecret ? 'var(--accent-light)' : 'var(--text-muted)' }}>{st.codeSecret || '— À générer —'}</td>
                         <td style={{ padding: 10, textAlign: 'right', fontWeight: 'bold' }}>
                           <span className={`status-badge ${
                             st.statusEmail.includes('✅') || st.statusEmail === 'Envoyé' ? 'email-sent' : 
@@ -894,50 +972,72 @@ export default function TeacherDashboard() {
         });
         
         return (
-          <div className="modal-overlay" onClick={() => setShowGradingModal(false)}>
-            <div className="modal" style={{ maxWidth: '900px', width: '95%', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-              <h2>{t('gradingTitle')}{activeCopie.prenom} {activeCopie.nom}</h2>
-              <p style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                Matricule: <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>{activeCopie.matricule}</span> 
-                <span style={{ color: 'var(--text-muted)' }}>•</span> 
-                {t('gradingCopieStatus')}: 
-                {activeCopie.estValidee ? (
-                  <span className="status-badge submitted"><span className="status-dot" />{t('resultsStatusSubmitted')}</span>
-                ) : (
-                  <span className="status-badge timeout"><span className="status-dot" />{t('resultsStatusFinishedTime')}</span>
+          <div className="modal-overlay" onClick={() => setShowGradingModal(false)} style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+            <div className="modal glass-card" style={{ maxWidth: showPdfPanel ? '1400px' : '900px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: 32, borderRadius: 24, border: '1px solid rgba(255,255,255,0.05)', background: '#0a0d0c', boxShadow: '0 20px 40px rgba(0,0,0,0.5)', transition: 'max-width 0.3s ease' }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fff', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ background: 'rgba(255,255,255,0.1)', padding: '8px 12px', borderRadius: 12 }}>📝</span>
+                {t('gradingTitle')}{activeCopie.prenom} {activeCopie.nom}
+              </h2>
+              <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16, paddingBottom: 24, borderBottom: '1px solid rgba(255,255,255,0.05)', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Numéro Étudiant:</span> <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: 6 }}>{activeCopie.matricule}</span> 
+                  <span style={{ color: 'var(--text-muted)' }}>•</span> 
+                  <span style={{ color: 'var(--text-secondary)' }}>{t('gradingCopieStatus')}:</span> 
+                  {activeCopie.estValidee ? (
+                    <span className="status-badge submitted" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 20, padding: '4px 12px', fontWeight: 600, fontSize: '0.8rem' }}><span className="status-dot" style={{ background: '#10b981', boxShadow: '0 0 8px #10b981' }} />{t('resultsStatusSubmitted')}</span>
+                  ) : (
+                    <span className="status-badge timeout" style={{ background: 'rgba(244,63,94,0.1)', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 20, padding: '4px 12px', fontWeight: 600, fontSize: '0.8rem' }}><span className="status-dot" style={{ background: '#f43f5e', boxShadow: '0 0 8px #f43f5e' }} />{t('resultsStatusFinishedTime')}</span>
+                  )}
+                </div>
+                
+                {currentSessionObj && currentSessionObj.sujetPdfBase64 && (
+                  <button onClick={() => setShowPdfPanel(!showPdfPanel)} style={{ background: showPdfPanel ? 'var(--accent)' : 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '6px 14px', color: '#fff', fontSize: '0.85rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'all 0.2s', fontWeight: 600 }}>
+                    {showPdfPanel ? '❌ Fermer le PDF' : '📄 Ouvrir le Sujet (PDF)'}
+                  </button>
                 )}
-              </p>
+              </div>
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20, margin: '20px 0' }}>
-                {examQsToDisplay.map((q, idx) => {
+              <div style={{ display: 'flex', gap: 32, flexDirection: showPdfPanel ? 'row' : 'column', alignItems: 'flex-start' }}>
+                
+                {/* PDF Viewer Panel */}
+                {showPdfPanel && currentSessionObj && currentSessionObj.sujetPdfBase64 && (
+                  <div style={{ flex: '1', width: '100%', height: 'calc(90vh - 200px)', minHeight: 500, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', background: '#fff', position: 'sticky', top: 0 }}>
+                    <iframe src={currentSessionObj.sujetPdfBase64} style={{ width: '100%', height: '100%', border: 'none' }} title="Sujet PDF" />
+                  </div>
+                )}
+
+                {/* Grading Panel */}
+                <div style={{ flex: '1', width: '100%' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {examQsToDisplay.map((q, idx) => {
                   const answerObj = studentAnswers[q.id] || {};
                   const answerType = answerObj.type || q.typeReponse || 'texte'; // fallback s'il y a un type hérité
                   const answerContent = answerObj.content !== undefined ? answerObj.content : (typeof studentAnswers[q.id] === 'string' ? studentAnswers[q.id] : '');
                   
                   const score = currentGrades[q.id] || 0;
                   return (
-                    <div key={q.id} style={{ padding: 16, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 8 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <h4 style={{ margin: 0, color: 'var(--accent-light)' }}>
+                    <div key={q.id} style={{ padding: 24, background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 16, boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <h4 style={{ margin: 0, color: 'var(--accent-light)', fontSize: '1.1rem', fontWeight: 700 }}>
                           {answerType === 'code' ? '💻 ' : answerType === 'uml' ? '📐 ' : '📝 '}
-                          Question {idx + 1} ({q.points} pt{q.points > 1 ? 's' : ''})
+                          Question {idx + 1} <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 400 }}>({q.points} pt{q.points > 1 ? 's' : ''})</span>
                         </h4>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{t('gradingQuestionPoints')}</label>
-                          <input type="number" min="0" max={q.points} step="0.5" className="form-input" style={{ width: 80, padding: '6px 10px' }}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.03)', padding: '6px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                          <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{t('gradingQuestionPoints')}</label>
+                          <input type="number" min="0" max={q.points} step="0.5" className="form-input" style={{ width: 80, padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontWeight: 700, borderRadius: 8, textAlign: 'center' }}
                             value={score} onChange={e => handleUpdateQuestionGrade(q.id, e.target.value)} />
                         </div>
                       </div>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12, fontStyle: 'italic' }}>
+                      <p style={{ fontSize: '1rem', color: '#fff', marginBottom: 16, fontStyle: 'normal', fontWeight: 500, paddingLeft: 12, borderLeft: '3px solid var(--accent-light)', lineHeight: 1.5 }}>
                         {q.enonce}
                       </p>
-                      <div style={{ background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6, border: '1px solid var(--border)' }}>
+                      <div style={{ background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.2)' }}>
                         {answerType === 'code' ? (
                           <pre style={{ margin: 0, fontFamily: 'Fira Code, monospace', fontSize: '0.85rem', color: '#c4b5fd', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
                             {answerContent || '// Aucune réponse fournie'}
                           </pre>
                         ) : answerType === 'uml' ? (
-                          <div style={{ minHeight: 320 }}>
+                          <div style={{ height: 400, border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, overflow: 'hidden' }}>
                             {answerContent ? (
                               <UMLEditor
                                 value={answerContent}
@@ -959,21 +1059,25 @@ export default function TeacherDashboard() {
                 })}
               </div>
 
-              <div className="form-group" style={{ marginBottom: 16 }}>
-                <label className="form-label">{t('gradingCommentLabel')}</label>
+              <div className="form-group" style={{ marginBottom: 24, marginTop: 32 }}>
+                <label className="form-label" style={{ color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.85rem' }}>{t('gradingCommentLabel')}</label>
                 <textarea className="form-textarea" placeholder={t('gradingCommentPlaceholder')}
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 16, minHeight: 100 }}
                   value={currentComment} onChange={e => setCurrentComment(e.target.value)} />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
-                  {t('gradingFinalScore')} <span style={{ color: 'var(--accent-light)' }}>
-                    {Object.values(currentGrades).reduce((acc, pts) => acc + Number(pts), 0)}
-                  </span> / {examQs.reduce((acc, q) => acc + Number(q.points), 0)} pts
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                   <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>{t('gradingFinalScore')}</div>
+                   <div style={{ fontSize: '1.8rem', fontWeight: 800, background: 'linear-gradient(135deg, var(--accent-light), var(--accent))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                     {Object.values(currentGrades).reduce((acc, pts) => acc + Number(pts), 0)} <span style={{ fontSize: '1rem', color: 'var(--text-muted)', WebkitTextFillColor: 'var(--text-muted)' }}>/ {examQs.reduce((acc, q) => acc + Number(q.points), 0)} pts</span>
+                   </div>
                 </div>
-                <div className="modal-actions">
-                  <button className="btn btn-ghost btn-sm" onClick={() => setShowGradingModal(false)}>{t('cancel')}</button>
-                  <button className="btn btn-primary btn-sm" onClick={handleSaveGrading}>{t('gradingSaveBtn')}</button>
+                <div className="modal-actions" style={{ display: 'flex', gap: 12 }}>
+                  <button className="btn btn-ghost" style={{ padding: '12px 24px', borderRadius: 12, color: 'var(--text-secondary)' }} onClick={() => setShowGradingModal(false)}>{t('cancel')}</button>
+                  <button className="btn btn-primary" style={{ padding: '12px 24px', borderRadius: 12, background: 'linear-gradient(135deg, var(--accent), var(--accent-dark))', border: 'none', fontWeight: 700, boxShadow: '0 8px 20px rgba(16,185,129,0.3)' }} onClick={handleSaveGrading}>{t('gradingSaveBtn')}</button>
+                </div>
+              </div>
                 </div>
               </div>
             </div>

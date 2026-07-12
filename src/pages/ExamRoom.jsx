@@ -8,29 +8,62 @@ const TYPE_ICONS = { texte: '📝', code: '💻', uml: '📐' };
 const TYPE_COLORS = { texte: 'var(--student-color)', code: 'var(--success)', uml: 'var(--teacher-color)' };
 
 // ─── Composant Minuterie ─────────────────────────────────────────────────────
-function Timer({ totalSeconds, onExpire }) {
-  const [seconds, setSeconds] = useState(totalSeconds);
+function Timer({ startTime, durationMinutes, onExpire }) {
+  const totalSeconds = durationMinutes * 60;
+
+  const getRemaining = () => {
+    if (!startTime) return totalSeconds;
+    const end = new Date(startTime).getTime() + durationMinutes * 60000;
+    const now = Date.now();
+    return Math.max(0, Math.floor((end - now) / 1000));
+  };
+
+  const [seconds, setSeconds] = useState(getRemaining());
   const expiredRef = useRef(false);
 
   useEffect(() => {
-    if (seconds <= 0) {
-      if (!expiredRef.current && onExpire) {
+    if (seconds <= 0 && !expiredRef.current && onExpire) {
+      expiredRef.current = true;
+      onExpire();
+      return;
+    }
+    const interval = setInterval(() => {
+      const rem = getRemaining();
+      setSeconds(rem);
+      if (rem <= 0 && !expiredRef.current && onExpire) {
         expiredRef.current = true;
         onExpire();
       }
-      return;
-    }
-    const interval = setInterval(() => setSeconds(s => s - 1), 1000);
+    }, 1000);
     return () => clearInterval(interval);
-  }, [seconds, onExpire]);
+  }, [startTime, durationMinutes, onExpire, seconds]);
 
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   const pad = n => String(n).padStart(2, '0');
-  const pct = seconds / totalSeconds;
-  const cls = pct > 0.5 ? 'normal' : pct > 0.2 ? 'warning' : '';
-  return <div className={`timer ${cls}`}>⏱ {pad(h)}:{pad(m)}:{pad(s)}</div>;
+  
+  const isCritical = seconds > 0 && seconds <= 300; // <= 5 minutes
+  
+  return (
+    <div 
+      className="timer"
+      style={{
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '8px 16px', borderRadius: '12px',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '1.2rem', fontWeight: 800,
+        background: isCritical ? 'rgba(225, 29, 72, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+        color: isCritical ? '#ef4444' : 'var(--success)',
+        border: `1px solid ${isCritical ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+        boxShadow: isCritical ? '0 0 15px rgba(239, 68, 68, 0.3)' : '0 0 10px rgba(16, 185, 129, 0.1)',
+        animation: isCritical ? 'pulse-critical 1.5s infinite' : 'none',
+        transition: 'all 0.3s ease'
+      }}
+    >
+      ⏱ {pad(h)}:{pad(m)}:{pad(s)}
+    </div>
+  );
 }
 
 // ─── Composant principal ExamRoom ─────────────────────────────────────────────
@@ -82,9 +115,9 @@ export default function ExamRoom() {
     if (questions.length === 0) {
       questions = [{
         id: 1,
-        enonce: 'Rédigez votre réponse au sujet ci-dessus.',
-        typeReponse: 'code',
-        points: 20
+        enonce: '',
+        typeReponse: null,
+        points: 0
       }];
     }
 
@@ -94,6 +127,7 @@ export default function ExamRoom() {
       instructions: parsed.instructions || '',
       langageCible: parsed.langageCible || 'Java',
       sujetPdfBase64: parsed.sujetPdfBase64 || null,
+      dateHeureDebut: parsed.dateHeureDebut || null,
       questions
     });
 
@@ -207,29 +241,35 @@ export default function ExamRoom() {
     <div className="gradient-bg exam-room">
 
       {/* ── Topbar ─────────────────────────────────────────────────────── */}
-      <header className="exam-topbar">
-        <div className="exam-info">
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              background: 'linear-gradient(135deg, var(--accent), var(--accent-dark))',
-              borderRadius: 7, width: 24, height: 24,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.75rem', flexShrink: 0
-            }}>🛡</span>
+      <header className="exam-topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: 'var(--bg-dark)', borderBottom: '1px solid var(--border)' }}>
+        
+        {/* Gauche : Code et Titre */}
+        <div className="exam-info" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ 
+            background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', 
+            padding: '6px 12px', borderRadius: 8, fontFamily: "'JetBrains Mono', monospace", 
+            color: 'var(--accent-light)', fontWeight: 700, fontSize: '0.9rem',
+            letterSpacing: '1px'
+          }}>
+            {sessionCode}
+          </div>
+          <h2 style={{ fontSize: '1.2rem', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
             {examData.titre}
           </h2>
-          <p>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent-light)', fontWeight: 700, fontSize: '0.95rem' }}>{sessionCode}</span>
-            <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
-            <span style={{ fontSize: '0.95rem', fontWeight: 500 }}>{studentName}</span> <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>({matricule})</span>
-          </p>
         </div>
-        <Timer totalSeconds={examData.dureeMinutes * 60} onExpire={handleTimeExpired} />
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--student-color), #0d9488)' }}>
-            {initials}
+
+        {/* Milieu : Chrono */}
+        <Timer startTime={examData.dateHeureDebut} durationMinutes={examData.dureeMinutes} onExpire={handleTimeExpired} />
+
+        {/* Droite : Étudiant et Bouton Soumettre */}
+        <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', borderRight: '1px solid var(--border)', paddingRight: 24 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#fff' }}>{studentName}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{matricule}</div>
+            </div>
           </div>
-          <button id="btn-submit-exam" className="btn btn-danger btn-sm" onClick={() => setShowSubmitModal(true)}>
+          <button id="btn-submit-exam" className="btn btn-danger btn-sm" onClick={() => setShowSubmitModal(true)} style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
             📤 {t('examRoomSubmitBtn')}
           </button>
         </div>
@@ -283,7 +323,7 @@ export default function ExamRoom() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: isCurrent ? 600 : 400, color: isCurrent ? 'var(--accent-light)' : 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {answers[q.id]?.type ? TYPE_CONFIG[answers[q.id].type]?.icon : '❓'} R{idx + 1} — {q.points} pts
+                    {answers[q.id]?.type ? TYPE_CONFIG[answers[q.id].type]?.icon : '❓'} R{idx + 1}{(q.points > 0 && !(q.points === 1 && !q.enonce)) ? ` — ${q.points} pts` : ''}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>
                     {q.enonce?.slice(0, 30)}{q.enonce?.length > 30 ? '…' : ''}
@@ -294,8 +334,13 @@ export default function ExamRoom() {
           })}
           
           <button
-            className="btn btn-outline btn-sm"
-            style={{ width: '100%', marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderStyle: 'dashed' }}
+            style={{ 
+              width: '100%', marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, 
+              background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.2)', color: 'var(--text-secondary)',
+              padding: '10px', borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s', fontSize: '0.85rem'
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'; }}
+            onMouseOut={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
             onClick={() => {
               const newId = `custom-${Date.now()}`;
               const newQuestion = {
@@ -335,10 +380,9 @@ export default function ExamRoom() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
           
           {/* ─ Panneau Gauche : Sujet Global & PDF ─ */}
-          <div style={{ flex: answers[question?.id]?.type === 'uml' ? '0 0 30%' : '0 0 45%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-            <div className="section-header" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', margin: 0 }}>
-              <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>📄 Sujet Officiel / Contexte Global</h2>
-            </div>
+          {(examData.sujetPdfBase64 || examData.instructions || examData.questions.some(q => q.enonce && q.enonce !== 'Nouvelle réponse libre')) && (
+            <div style={{ flex: answers[question?.id]?.type === 'uml' ? '0 0 30%' : '0 0 45%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {examData.instructions && (
                 <div style={{ padding: 20, fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-secondary)', borderBottom: examData.sujetPdfBase64 ? '1px solid var(--border)' : 'none' }}>
@@ -350,49 +394,47 @@ export default function ExamRoom() {
                   <iframe src={examData.sujetPdfBase64} title="Sujet PDF" width="100%" height="100%" style={{ border: 'none' }} />
                 </div>
               )}
-              {!examData.instructions && !examData.sujetPdfBase64 && (
-                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-                  Aucun contexte global fourni par l'enseignant.
+              
+              {!examData.sujetPdfBase64 && examData.questions.some(q => q.enonce && q.enonce !== 'Nouvelle réponse libre') && (
+                <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <h3 style={{ fontSize: '1.2rem', color: 'var(--text-light)', borderBottom: '1px solid var(--border)', paddingBottom: '10px', margin: 0 }}>
+                    Sujet de l'examen
+                  </h3>
+                  {examData.questions.map((q, idx) => (
+                    (q.enonce && q.enonce !== 'Nouvelle réponse libre') ? (
+                      <div key={q.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--accent-light)' }}>Question {idx + 1}</span>
+                          {q.points > 0 && (
+                            <span style={{ fontSize: '0.85rem', background: 'var(--accent-subtle)', color: 'var(--accent)', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
+                              {q.points} pts
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.95rem', color: '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                          {q.enonce}
+                        </div>
+                      </div>
+                    ) : null
+                  ))}
                 </div>
               )}
             </div>
           </div>
+          )}
 
           {/* ─ Panneau Droit : Zone de Travail (Question en cours) ─ */}
           <div className="question-workspace" style={{ flex: answers[question?.id]?.type === 'uml' ? '1 1 70%' : '1 1 55%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
             <div className="question-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: 0, border: 'none' }}>
 
               {/* En-tête question */}
-              <div className="question-statement">
-                {/* Fil d'Ariane */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                  <span style={{
-                    fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700,
-                    textTransform: 'uppercase', letterSpacing: '0.1em',
-                    padding: '3px 10px', background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid var(--border)', borderRadius: 6
-                  }}>
-                    R{currentQ + 1}/{totalQ}
-                  </span>
-                  <div style={{ flex: 1, height: 2, background: 'var(--border)', borderRadius: 4 }}>
-                    <div style={{ width: `${((currentQ + 1) / totalQ) * 100}%`, height: '100%', background: 'var(--accent)', borderRadius: 4, transition: 'width 0.3s' }} />
-                  </div>
-                  <span style={{
-                    fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-light)',
-                    background: 'var(--accent-subtle)', padding: '3px 12px', borderRadius: 999,
-                    border: '1px solid rgba(16,185,129,0.2)',
-                    fontFamily: "'JetBrains Mono', monospace"
-                  }}>
-                    {question?.points} pt{question?.points > 1 ? 's' : ''}
-                  </span>
+              {question?.enonce && (
+                <div className="question-statement">
+                  <h3 style={{ fontSize: '1.3rem', lineHeight: 1.6, color: '#e2e8f0', marginBottom: 16, fontWeight: 700 }}>
+                    {question.enonce}
+                  </h3>
                 </div>
-
-                {/* Énoncé */}
-                <h3 style={{ fontSize: '1.3rem', lineHeight: 1.6, color: '#e2e8f0', marginBottom: 16, fontWeight: 700 }}>
-                  {question?.enonce}
-                </h3>
-
-              </div>
+              )}
 
               {/* Zone de réponse */}
               <div className="answer-area" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -551,18 +593,24 @@ export default function ExamRoom() {
       {/* ── Modal de soumission ──────────────────────────────────────────── */}
       {showSubmitModal && (
         <div className="modal-overlay">
-          <div className="modal">
-            <h2>📤 {t('examRoomSubmitConfirmTitle')}</h2>
-            <p>
+          <div className="modal" style={{ background: 'rgba(10, 10, 10, 0.8)', border: '1px solid var(--border)', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: '3rem', marginBottom: 10 }}>📤</div>
+              <h2 style={{ color: 'var(--text-light)', margin: 0 }}>{t('examRoomSubmitConfirmTitle')}</h2>
+            </div>
+            
+            <p style={{ textAlign: 'center', fontSize: '1.05rem', color: 'var(--text-secondary)' }}>
               {t('examRoomSubmitConfirmDesc')}{' '}
-              <strong style={{ color: answeredCount === totalQ ? 'var(--success)' : 'var(--warning)' }}>
+              <strong style={{ color: answeredCount === totalQ ? 'var(--success)' : 'var(--warning)', fontSize: '1.2rem' }}>
                 {answeredCount} / {totalQ}
-              </strong>.
+              </strong>
             </p>
+            
             {answeredCount < totalQ && (
-              <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--warning)', margin: 0 }}>
-                  ⚠️ {t('examRoomSubmitConfirmWarning')}
+              <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 'var(--radius)', padding: 16, marginBottom: 24, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                <p style={{ fontSize: '0.9rem', color: 'var(--warning)', margin: 0, lineHeight: 1.5 }}>
+                  {t('examRoomSubmitConfirmWarning')}
                 </p>
               </div>
             )}

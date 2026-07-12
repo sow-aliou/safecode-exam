@@ -262,8 +262,8 @@ app.post('/api/student/login', (req, res) => {
   const { matricule, sessionCode, password } = req.body;
 
   db.get(
-    `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, 
-            e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte
+    `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, c.estValidee,
+            e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte, s.dateHeureDebut
      FROM Utilisateur u
      JOIN Copie c ON c.etudiant_id = u.id
      JOIN SessionExamen s ON c.session_id = s.id
@@ -277,6 +277,20 @@ app.post('/api/student/login', (req, res) => {
       if (!row) {
         return res.status(400).json({ error: "Identifiants invalides ou session introuvable." });
       }
+
+      if (row.estValidee) {
+        return res.status(403).json({ error: "Vous avez déjà soumis votre copie pour cette épreuve." });
+      }
+      
+      if (row.dateHeureDebut) {
+        const start = new Date(row.dateHeureDebut);
+        const end = new Date(start.getTime() + (row.dureeMinutes || 120) * 60000);
+        const now = new Date();
+        if (now > end) {
+          return res.status(403).json({ error: "L'épreuve est déjà terminée et l'accès est fermé." });
+        }
+      }
+
       res.json({ success: true, user: row });
     }
   );

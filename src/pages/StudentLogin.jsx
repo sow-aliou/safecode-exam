@@ -2,6 +2,158 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../utils/lang';
 
+const authStyles = `
+  .auth-wrapper {
+    min-height: 100vh;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+    background: #050807;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .auth-bg-glow {
+    position: absolute;
+    width: 60vw;
+    height: 60vw;
+    max-width: 600px;
+    max-height: 600px;
+    background: radial-gradient(circle, rgba(20,184,166,0.08) 0%, transparent 60%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 0;
+    pointer-events: none;
+    animation: pulse-dot 6s ease-in-out infinite alternate;
+  }
+  .premium-auth-card {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 440px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-radius: 28px;
+    padding: 48px 40px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .auth-icon-premium {
+    width: 64px; height: 64px;
+    background: linear-gradient(135deg, rgba(20,184,166,0.15), rgba(20,184,166,0.02));
+    border: 1px solid rgba(20,184,166,0.25);
+    color: var(--student-light);
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.2rem;
+    margin: 0 auto 24px;
+    box-shadow: 0 8px 24px rgba(20,184,166,0.15), inset 0 2px 0 rgba(255,255,255,0.1);
+  }
+  .auth-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #fff;
+    text-align: center;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .auth-subtitle {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .premium-input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: #fff;
+    font-size: 0.95rem;
+    padding: 14px 16px;
+    transition: all 0.2s ease;
+    width: 100%;
+  }
+  .premium-input:focus {
+    outline: none;
+    border-color: var(--student-color);
+    background: rgba(20, 184, 166, 0.05);
+    box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.1);
+  }
+  .premium-btn {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.25);
+  }
+  .premium-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.35);
+  }
+  .premium-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .lang-switcher {
+    position: absolute;
+    top: 32px;
+    right: 32px;
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 6px;
+    z-index: 50;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .lang-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+  }
+  .lang-btn.active {
+    background: var(--student-subtle);
+    color: var(--student-light);
+    border: 1px solid rgba(20,184,166,0.2);
+  }
+  .lang-btn:hover:not(.active) {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+  }
+  .back-btn-premium {
+    position: absolute; top: 32px; left: 32px;
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-secondary); font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    padding: 8px 16px; border-radius: 12px; backdrop-filter: blur(10px);
+    transition: all 0.2s ease; z-index: 50;
+  }
+  .back-btn-premium:hover {
+    color: #fff; background: rgba(255,255,255,0.08); transform: translateX(-2px);
+  }
+`;
+
 export default function StudentLogin() {
   const navigate = useNavigate();
   const { t, lang, setLanguage } = useTranslation();
@@ -31,6 +183,7 @@ export default function StudentLogin() {
         instructions: user.instructions,
         langageCible: user.langageCible,
         sujetPdfBase64: user.sujetPdfBase64,
+        dateHeureDebut: user.dateHeureDebut || null,
         enonceTexte: user.enonceTexte || null
       }));
       navigate(`/exam/${examCode.trim().toUpperCase()}`);
@@ -41,7 +194,7 @@ export default function StudentLogin() {
         const response = await window.electronAPI.studentLogin(
           matricule.trim().toUpperCase(),
           examCode.trim().toUpperCase(),
-          personalCode.trim()
+          personalCode.trim().toUpperCase()
         );
         setLoading(false);
         if (response.success && response.user) {
@@ -62,7 +215,7 @@ export default function StudentLogin() {
           body: JSON.stringify({
             matricule: matricule.trim().toUpperCase(),
             sessionCode: examCode.trim().toUpperCase(),
-            password: personalCode.trim()
+            password: personalCode.trim().toUpperCase()
           })
         });
         const data = await response.json();
@@ -81,101 +234,96 @@ export default function StudentLogin() {
   };
 
   return (
-    <div className="gradient-bg auth-page">
-      <button className="back-btn" onClick={() => navigate('/')}>
-        ← {t('back')}
-      </button>
+    <>
+      <style>{authStyles}</style>
+      <div className="auth-wrapper">
+        <div className="auth-bg-glow"></div>
+        
+        <button className="back-btn-premium" onClick={() => navigate('/')}>
+          ← {t('back')}
+        </button>
 
-      {/* Sélecteur de langue */}
-      <div style={{ position: 'fixed', top: 20, right: 24, display: 'flex', gap: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 4, border: '1px solid var(--border)', zIndex: 50 }}>
-        <button onClick={() => setLanguage('fr')} style={{ background: lang === 'fr' ? 'var(--accent)' : 'transparent', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>FR</button>
-        <button onClick={() => setLanguage('en')} style={{ background: lang === 'en' ? 'var(--accent)' : 'transparent', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}>EN</button>
-      </div>
+        {/* Sélecteur de langue */}
+        <div className="lang-switcher">
+          <button className={`lang-btn ${lang === 'fr' ? 'active' : ''}`} onClick={() => setLanguage('fr')}>FR</button>
+          <button className={`lang-btn ${lang === 'en' ? 'active' : ''}`} onClick={() => setLanguage('en')}>EN</button>
+        </div>
 
-      <div className="glass-card auth-card animate-fade-up">
-        <div className="auth-header">
-          <div className="auth-icon" style={{ background: 'var(--student-subtle)', color: 'var(--student-light)', border: '1px solid rgba(20,184,166,0.2)' }}>
+        <div className="premium-auth-card animate-fade-up">
+          <div className="auth-icon-premium">
             🎓
           </div>
-          <h2>{t('studentTitle')}</h2>
-          <p>{t('studentDesc')}</p>
-        </div>
+          <h2 className="auth-title">{t('studentTitle')}</h2>
+          <p className="auth-subtitle">{t('studentDesc')}</p>
 
-        <form className="auth-form" onSubmit={handleJoin}>
-          <div className="form-group">
-            <label className="form-label">{t('matriculeLabel')}</label>
-            <input
-              id="matricule"
-              className="form-input"
-              type="text"
-              placeholder="ex: ETU-2024-001"
-              value={matricule}
-              onChange={e => setMatricule(e.target.value)}
-              style={{ textTransform: 'uppercase' }}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">{t('examCodeLabel')}</label>
-            <input
-              id="exam-code"
-              className="form-input"
-              type="text"
-              placeholder="ex: XK9-2A4"
-              value={examCode}
-              onChange={e => setExamCode(e.target.value)}
-              style={{ 
-                textTransform: 'uppercase', 
-                fontFamily: "'JetBrains Mono', monospace", 
-                fontSize: '1.1rem', 
-                textAlign: 'center',
-                letterSpacing: '0.15em'
-              }}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">{t('personalCodeLabel')}</label>
-            <input
-              id="personal-code"
-              className="form-input"
-              type="password"
-              placeholder="••••••••"
-              value={personalCode}
-              onChange={e => setPersonalCode(e.target.value)}
-              style={{ textAlign: 'center', letterSpacing: '0.1em' }}
-            />
-          </div>
-
-          {error && (
-            <div style={{ 
-              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-              borderRadius: 'var(--radius)', padding: '12px', fontSize: '0.875rem', color: '#f87171',
-              textAlign: 'center', lineHeight: '1.4'
-            }}>
-              ⚠️ {error}
+          <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--student-color)' }}>👤</span> {t('matriculeLabel')}
+              </label>
+              <input
+                id="matricule"
+                className="premium-input"
+                type="text"
+                placeholder="ex: ETU001"
+                value={matricule}
+                onChange={e => setMatricule(e.target.value)}
+                style={{ textTransform: 'uppercase' }}
+              />
             </div>
-          )}
 
-          <button id="btn-join-exam" className="btn btn-primary btn-block btn-lg" type="submit" disabled={loading}>
-            {loading ? `⏳ ${t('verifying')}` : `🚀 ${t('launchBtn')}`}
-          </button>
-        </form>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--student-color)' }}>📝</span> {t('examCodeLabel')}
+              </label>
+              <input
+                id="exam-code"
+                className="premium-input"
+                type="text"
+                placeholder="ex: X4K9"
+                value={examCode}
+                onChange={e => setExamCode(e.target.value)}
+                style={{ 
+                  textTransform: 'uppercase', 
+                  fontFamily: "'JetBrains Mono', monospace", 
+                  fontSize: '1.1rem', 
+                  letterSpacing: '0.15em'
+                }}
+              />
+            </div>
 
-        <p className="text-center text-muted text-sm mt-4">
-          {t('studentHelpText')}
-        </p>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: '#e11d48' }}>🔑</span> {t('personalCodeLabel')}
+              </label>
+              <input
+                id="personal-code"
+                className="premium-input"
+                type="password"
+                placeholder="••••••••"
+                value={personalCode}
+                onChange={e => setPersonalCode(e.target.value)}
+                style={{ letterSpacing: '0.1em', fontFamily: "'JetBrains Mono', monospace" }}
+              />
+            </div>
 
-        {/* Séparateur */}
-        <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16, textAlign: 'center' }}>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            💡 {lang === 'fr' ? 'Mode démo :' : 'Demo mode:'}{' '}
-            <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-light)', fontSize: '0.75rem', fontWeight: 600 }}>
-              DEV_001 / 1234 / PASS123
-            </span>
-          </p>
+            {error && (
+              <div style={{ 
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: '10px', padding: '12px', fontSize: '0.85rem', color: '#f87171',
+                textAlign: 'center', lineHeight: '1.4'
+              }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            <button id="btn-join-exam" className="premium-btn" type="submit" disabled={loading}>
+              {loading ? `⏳ ${t('verifying')}` : `🚀 ${t('launchBtn')}`}
+            </button>
+          </form>
+
         </div>
       </div>
-    </div>
+    </>
   );
 }
