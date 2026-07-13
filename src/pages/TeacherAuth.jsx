@@ -206,7 +206,11 @@ export default function TeacherAuth() {
       const data = await response.json();
       setLoading(false);
       if (data.success) {
-        const teacher = data.teacher || form;
+        const teacher = data.teacher || {};
+        sessionStorage.setItem('teacher_token', data.token);
+        if (window.electronAPI) {
+          window.electronAPI.invoke('set-auth-token', data.token);
+        }
         sessionStorage.setItem('teacher_email', teacher.email);
         sessionStorage.setItem('teacher_name', `${teacher.prenom || ''} ${teacher.nom || ''}`.trim() || 'Enseignant');
         sessionStorage.setItem('teacher_id', teacher.id || data.teacherId);
@@ -217,7 +221,9 @@ export default function TeacherAuth() {
     } catch (err) {
       setLoading(false);
       // Mode démo : accès direct sans serveur
-      if (tab === 'login' && form.email && form.motDePasse) {
+      if (tab === 'login') {
+        // En mode démo on force un mock (mais on ne devrait plus être en mock avec le backend)
+        sessionStorage.setItem('teacher_token', 'mock_token');
         sessionStorage.setItem('teacher_email', form.email);
         sessionStorage.setItem('teacher_name', form.prenom ? `${form.prenom} ${form.nom}` : form.email.split('@')[0]);
         sessionStorage.setItem('teacher_id', '1');

@@ -1,56 +1,134 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import nodemailer from 'nodemailer';
 import db from './db.js';
 import { autoGradeCopie } from './autograder.js';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const JWT_SECRET = process.env.JWT_SECRET || 'safecode_super_secret_key_2026';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Augmenté pour supporter l'upload des PDF base64
+app.use(express.json({ limit: '10mb' }));
 
-// Mailer configuration (peut être configuré via variables d'environnement)
-// En dev, on log les identifiants dans la console et on renvoie les mails simulés
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-  port: process.env.SMTP_PORT || 587,
-  auth: {
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || ''
+// Servir les fichiers statiques du Frontend (React/Vite)
+app.use(express.static(path.join(__dirname, '../dist')));
+
+let transporter;
+if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: process.env.SMTP_PORT || 587,
+    secure: process.env.SMTP_PORT == 465,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+  console.log("Nodemailer configuré avec le serveur SMTP personnalisé.");
+} else {
+  nodemailer.createTestAccount((err, account) => {
+    if (err) {
+      console.error('Failed to create a testing account. ' + err.message);
+      return;
+    }
+    transporter = nodemailer.createTransport({
+      host: account.smtp.host,
+      port: account.smtp.port,
+      secure: account.smtp.secure,
+      auth: {
+        user: account.user,
+        pass: account.pass
+      }
+    });
+    console.log("Nodemailer configuré avec le mode Simulation (Ethereal).");
+  });
+}
+
+// ================= JWT MIDDLEWARE =================
+
+export function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Accès refusé. Jeton manquant." });
   }
-});
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: "Jeton invalide ou expiré." });
+    }
+    req.user = user;
+    next();
+  });
+}
 
 // ================= TEACHER AUTH =================
 
-app.post('/api/teacher/register', (req, res) => {
+app.post('/api/teacher/register', async (req, res) => {
   const { nom, prenom, email, motDePasse } = req.body;
   if (!email || !motDePasse) {
     return res.status(400).json({ error: "Email et mot de passe requis." });
   }
 
-  db.run(
-    `INSERT INTO Utilisateur (nom, prenom, email, motDePasse, typeUtilisateur) VALUES (?, ?, ?, ?, 'Enseignant')`,
-    [nom, prenom, email, motDePasse],
-    function(err) {
-      if (err) {
-        return res.status(400).json({ error: "Cet email est déjà enregistré." });
+  try {
+    const hashedPassword = await bcrypt.hash(motDePasse, 10);
+    db.run(
+      `INSERT INTO Utilisateur (nom, prenom, email, motDePasse, typeUtilisateur) VALUES (?, ?, ?, ?, 'Enseignant')`,
+      [nom, prenom, email, hashedPassword],
+      function(err) {
+        if (err) {
+          return res.status(400).json({ error: "Cet email est déjà enregistré." });
+        }
+        res.json({ success: true, teacherId: this.lastID });
       }
-      res.json({ success: true, teacherId: this.lastID });
-    }
-  );
+    );
+  } catch (error) {
+    res.status(500).json({ error: "Erreur lors du hachage du mot de passe." });
+  }
 });
 
 app.post('/api/teacher/login', (req, res) => {
   const { email, motDePasse } = req.body;
   db.get(
-    `SELECT * FROM Utilisateur WHERE email = ? AND motDePasse = ? AND typeUtilisateur = 'Enseignant'`,
-    [email, motDePasse],
-    (err, row) => {
+    `SELECT * FROM Utilisateur WHERE email = ? AND typeUtilisateur = 'Enseignant'`,
+    [email],
+    async (err, row) => {
       if (err || !row) {
         return res.status(400).json({ error: "Identifiants incorrects." });
       }
-      res.json({ success: true, teacher: { id: row.id, nom: row.nom, prenom: row.prenom, email: row.email } });
+      
+      const match = await bcrypt.compare(motDePasse, row.motDePasse);
+      if (!match) {
+        // Fallback for plaintext passwords (legacy) during transition
+        if (motDePasse === row.motDePasse) {
+          console.warn(`Plaintext password matched for ${email}. You should re-register or update your password.`);
+        } else {
+          return res.status(400).json({ error: "Identifiants incorrects." });
+        }
+      }
+
+      const token = jwt.sign(
+        { id: row.id, role: 'Enseignant' },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      res.json({ 
+        success: true, 
+        token,
+        teacher: { id: row.id, nom: row.nom, prenom: row.prenom, email: row.email } 
+      });
     }
   );
 });
@@ -58,7 +136,7 @@ app.post('/api/teacher/login', (req, res) => {
 // ================= SESSIONS & EXAMS =================
 
 // Récupérer toutes les sessions d'un enseignant
-app.get('/api/sessions', (req, res) => {
+app.get('/api/sessions', authenticateToken, (req, res) => {
   const teacherId = req.query.teacherId;
   let query = `SELECT s.id, s.codeAccesSecret as code, s.dateHeureDebut as date, e.titre as title, 
             e.dureeMinutes as duree, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte,
@@ -84,8 +162,35 @@ app.get('/api/sessions', (req, res) => {
   );
 });
 
+// Récupérer le statut en direct des étudiants d'une session
+app.get('/api/sessions/:id/live', authenticateToken, (req, res) => {
+  const sessionId = req.params.id;
+  
+  db.all(
+    `SELECT c.id as copieId, u.id as studentId, u.nom, u.prenom, u.matricule, c.estValidee, c.dernierPing
+     FROM Copie c
+     JOIN Utilisateur u ON c.etudiant_id = u.id
+     WHERE c.session_id = ?`,
+    [sessionId],
+    (err, students) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      db.all(
+        `SELECT id, etudiant_id, horodatage, typeEvenement, description, criticite 
+         FROM JournalLog 
+         WHERE session_id = ? ORDER BY horodatage DESC`,
+        [sessionId],
+        (err2, logs) => {
+          if (err2) return res.status(500).json({ error: err2.message });
+          res.json({ success: true, students, logs });
+        }
+      );
+    }
+  );
+});
+
 // Créer une session et son épreuve associée
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', authenticateToken, (req, res) => {
   const { title, date, code, duree, instructions, langageCible, teacherId } = req.body;
 
   db.serialize(() => {
@@ -114,7 +219,7 @@ app.post('/api/sessions', (req, res) => {
 });
 
 // Charger l'épreuve complète d'une session
-app.get('/api/sessions/:id/exam', (req, res) => {
+app.get('/api/sessions/:id/exam', authenticateToken, (req, res) => {
   const sessionId = req.params.id;
   db.get(
     `SELECT e.titre as title, e.dureeMinutes as duree, e.instructions, e.langageCible,
@@ -132,7 +237,7 @@ app.get('/api/sessions/:id/exam', (req, res) => {
 });
 
 // Mettre à jour l'épreuve complète (questions, PDF, titre, durée, date...)
-app.post('/api/sessions/:id/exam', (req, res) => {
+app.post('/api/sessions/:id/exam', authenticateToken, (req, res) => {
   const sessionId = req.params.id;
   const { title, duree, instructions, langageCible, sujetPdfBase64, questions, dateHeureDebut } = req.body;
 
@@ -161,8 +266,35 @@ app.post('/api/sessions/:id/exam', (req, res) => {
   });
 });
 
+// Ajouter du temps à une session en cours
+app.post('/api/sessions/:id/add-time', authenticateToken, (req, res) => {
+  const sessionId = req.params.id;
+  const { additionalMinutes } = req.body;
+
+  if (!additionalMinutes || isNaN(additionalMinutes)) {
+    return res.status(400).json({ error: 'additionalMinutes est requis et doit être un nombre.' });
+  }
+
+  db.serialize(() => {
+    // Il faut d'abord récupérer l'examen lié à la session
+    db.get(`SELECT examen_id FROM SessionExamen WHERE id = ?`, [sessionId], (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.status(404).json({ error: 'Session introuvable.' });
+
+      db.run(
+        `UPDATE Examen SET dureeMinutes = dureeMinutes + ? WHERE id = ?`,
+        [Number(additionalMinutes), row.examen_id],
+        function(err2) {
+          if (err2) return res.status(500).json({ error: err2.message });
+          res.json({ success: true, added: additionalMinutes });
+        }
+      );
+    });
+  });
+});
+
 // Uploader le PDF sujet (legacy)
-app.post('/api/sessions/:id/pdf', (req, res) => {
+app.post('/api/sessions/:id/pdf', authenticateToken, (req, res) => {
   const sessionId = req.params.id;
   const { pdfBase64 } = req.body;
 
@@ -181,26 +313,58 @@ app.post('/api/sessions/:id/pdf', (req, res) => {
 // ================= STUDENTS & EMAILS =================
 
 // Importer et envoyer par email les accès
-app.post('/api/sessions/:id/students', async (req, res) => {
+app.post('/api/sessions/:id/students', authenticateToken, async (req, res) => {
   const sessionId = req.params.id;
+  const teacherId = req.user.id;
   const { students } = req.body; // Array de { matricule, nom, prenom, email, codeSecret }
 
   if (!students || !Array.isArray(students)) {
     return res.status(400).json({ error: "Liste d'étudiants invalide." });
   }
 
-  try {
-    db.serialize(() => {
-      let completed = 0;
-      let errors = [];
+  // Récupérer les infos du professeur et de l'examen pour un email personnalisé SaaS
+  db.get(
+    `SELECT u.nom as profNom, u.prenom as profPrenom, e.titre as examenTitre, s.codeAccesSecret, s.dateHeureDebut
+     FROM Utilisateur u, SessionExamen s 
+     JOIN Examen e ON s.examen_id = e.id 
+     WHERE u.id = ? AND s.id = ?`,
+    [teacherId, sessionId],
+    async (err, contextInfo) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      const profNom = contextInfo ? contextInfo.profNom : 'votre enseignant';
+      const profPrenom = contextInfo ? contextInfo.profPrenom : '';
+      const examenTitre = contextInfo ? contextInfo.examenTitre : 'Épreuve Sécurisée';
+      const sessionCode = contextInfo ? contextInfo.codeAccesSecret : sessionId;
+      
+      let dateExamenFormatee = 'Date non spécifiée';
+      if (contextInfo && contextInfo.dateHeureDebut) {
+        const d = new Date(contextInfo.dateHeureDebut);
+        dateExamenFormatee = d.toLocaleString('fr-FR', { 
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', 
+          hour: '2-digit', minute: '2-digit' 
+        });
+      }
 
-      students.forEach((student) => {
-        // 1. Insérer ou mettre à jour l'étudiant
-        db.run(
-          `INSERT INTO Utilisateur (matricule, nom, prenom, email, motDePasse, typeUtilisateur) 
-           VALUES (?, ?, ?, ?, ?, 'Etudiant')
-           ON CONFLICT(matricule) DO UPDATE SET nom=excluded.nom, prenom=excluded.prenom, email=excluded.email, motDePasse=excluded.motDePasse`,
-          [student.matricule, student.nom, student.prenom, student.email, student.codeSecret],
+      try {
+        const studentsWithHashedPasswords = await Promise.all(
+          students.map(async (student) => {
+            const hashedPassword = await bcrypt.hash(student.codeSecret, 10);
+            return { ...student, hashedPassword };
+        })
+      );
+
+      db.serialize(() => {
+        let completed = 0;
+        let errors = [];
+
+        studentsWithHashedPasswords.forEach((student) => {
+          // 1. Insérer ou mettre à jour l'étudiant
+          db.run(
+            `INSERT INTO Utilisateur (matricule, nom, prenom, email, motDePasse, typeUtilisateur) 
+             VALUES (?, ?, ?, ?, ?, 'Etudiant')
+             ON CONFLICT(matricule) DO UPDATE SET nom=excluded.nom, prenom=excluded.prenom, email=excluded.email, motDePasse=excluded.motDePasse`,
+            [student.matricule, student.nom, student.prenom, student.email, student.hashedPassword],
           function(err) {
             if (err) {
               errors.push(`Erreur insertion ${student.matricule}: ${err.message}`);
@@ -218,9 +382,58 @@ app.post('/api/sessions/:id/students', async (req, res) => {
                  VALUES (?, ?, '', '')
                  ON CONFLICT(etudiant_id, session_id) DO NOTHING`,
                 [studentId, sessionId],
-                function(errCopie) {
-                  // Simulation d'envoi d'email : Log de sécurité dans la console du serveur
-                  console.log(`[EMAIL SEND SIMULATION] TO: ${student.email} | SUBJECT: Vos Accès SAFECODE-EXAM | Matricule: ${student.matricule} | Code Session: ${sessionId} | Code Secret Unique: ${student.codeSecret}`);
+                async function(errCopie) {
+                  // Envoi réel de l'email via Nodemailer
+                  try {
+                    const emailHtml = `
+                      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9fafb;">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                          <h2 style="color: #10b981; margin: 0;">SafeCode Exam</h2>
+                        </div>
+                        <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                          <p style="font-size: 16px; color: #374151;">Bonjour <strong>${student.prenom}</strong>,</p>
+                          <p style="font-size: 16px; color: #374151; line-height: 1.5;">
+                            Le professeur <strong>${profPrenom} ${profNom}</strong> vous a convié(e) à participer à l'examen <strong>"${examenTitre}"</strong> sur la plateforme SafeCode.
+                          </p>
+                          
+                          <div style="background-color: #eef2ff; padding: 12px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #6366f1;">
+                            <p style="margin: 0; font-size: 15px; color: #4338ca;"><strong>📅 Date de l'épreuve :</strong> ${dateExamenFormatee}</p>
+                          </div>
+
+                          <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
+                            <p style="margin: 0 0 10px 0; font-size: 15px; color: #4b5563;">Voici vos accès personnels et confidentiels pour vous connecter à l'épreuve :</p>
+                            <ul style="list-style-type: none; padding: 0; margin: 0;">
+                              <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Code de session :</span> <strong style="font-size: 18px; color: #111827; letter-spacing: 1px;">${sessionCode}</strong></li>
+                              <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Matricule :</span> <strong style="font-size: 16px; color: #111827;">${student.matricule}</strong></li>
+                              <li><span style="color: #6b7280;">Code Secret :</span> <strong style="font-size: 18px; color: #10b981; letter-spacing: 1px;">${student.codeSecret}</strong></li>
+                            </ul>
+                          </div>
+                          <p style="font-size: 15px; color: #4b5563; line-height: 1.5;">
+                            Rendez-vous sur la plateforme à l'heure prévue pour l'épreuve.<br>
+                            Veuillez ne pas partager ces identifiants, ils sont uniques et liés à votre copie.
+                          </p>
+                          <p style="font-size: 16px; color: #374151; font-weight: bold; margin-top: 30px;">Bon courage et excellente journée !</p>
+                        </div>
+                        <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #9ca3af;">
+                          <p>Cet email a été envoyé automatiquement par la plateforme SafeCode-Exam. Merci de ne pas y répondre.</p>
+                        </div>
+                      </div>
+                    `;
+
+                    const mailOptions = {
+                      from: '"Plateforme SAFECODE-EXAM" <noreply@safecode-exam.com>',
+                      to: student.email,
+                      subject: `🚨 Vos Accès pour l'examen : ${examenTitre}`,
+                      text: `Bonjour ${student.prenom},\n\nLe professeur ${profPrenom} ${profNom} vous a convié(e) à participer à l'examen "${examenTitre}" sur la plateforme SafeCode.\nDate : ${dateExamenFormatee}\n\nVoici vos accès personnels et confidentiels :\n\n- Code de session : ${sessionCode}\n- Matricule : ${student.matricule}\n- Code Secret : ${student.codeSecret}\n\nBon courage !`,
+                      html: emailHtml
+                    };
+                    const info = await transporter.sendMail(mailOptions);
+                    console.log(`[EMAIL ENVOYÉ] à ${student.email}`);
+                    console.log(`Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
+                  } catch (mailErr) {
+                    console.error(`Erreur d'envoi d'email à ${student.email}:`, mailErr.message);
+                    errors.push(`Erreur email ${student.matricule}: ${mailErr.message}`);
+                  }
                   
                   completed++;
                   if (completed === students.length) {
@@ -236,13 +449,14 @@ app.post('/api/sessions/:id/students', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+  }); // Close db.get callback
 });
 
 // Récupérer les étudiants d'une session
-app.get('/api/sessions/:id/students', (req, res) => {
+app.get('/api/sessions/:id/students', authenticateToken, (req, res) => {
   const sessionId = req.params.id;
   db.all(
-    `SELECT u.id, u.matricule, u.nom, u.prenom, u.email, u.motDePasse as codeSecret, c.estValidee
+    `SELECT u.id, u.matricule, u.nom, u.prenom, u.email, '***' as codeSecret, c.estValidee
      FROM Copie c
      JOIN Utilisateur u ON c.etudiant_id = u.id
      WHERE c.session_id = ?`,
@@ -258,24 +472,55 @@ app.get('/api/sessions/:id/students', (req, res) => {
 
 // ================= STUDENT LOGIN & EXAM =================
 
+// ================= STUDENT LIVE TRACKING & AUTH =================
+
+app.post('/api/student/ping', authenticateToken, (req, res) => {
+  const { copieId, etudiantId, sessionId, alerts } = req.body;
+  if (!copieId) return res.status(400).json({ error: "copieId requis" });
+
+  db.serialize(() => {
+    // Mettre à jour le dernier ping
+    db.run(`UPDATE Copie SET dernierPing = CURRENT_TIMESTAMP WHERE id = ?`, [copieId]);
+
+    // Enregistrer les alertes s'il y en a
+    if (alerts && alerts.length > 0) {
+      const stmt = db.prepare(`INSERT INTO JournalLog (session_id, etudiant_id, typeEvenement, description, criticite) VALUES (?, ?, ?, ?, ?)`);
+      alerts.forEach(alert => {
+        stmt.run([sessionId, etudiantId, alert.type, alert.description, alert.criticite || 'Avertissement']);
+      });
+      stmt.finalize();
+    }
+  });
+
+  res.json({ success: true });
+});
+
 app.post('/api/student/login', (req, res) => {
   const { matricule, sessionCode, password } = req.body;
 
   db.get(
-    `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, c.estValidee,
+    `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, u.motDePasse, s.id as sessionId, c.id as copieId, c.estValidee,
             e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64, e.enonceTexte, s.dateHeureDebut
      FROM Utilisateur u
      JOIN Copie c ON c.etudiant_id = u.id
      JOIN SessionExamen s ON c.session_id = s.id
      JOIN Examen e ON s.examen_id = e.id
-     WHERE u.matricule = ? AND s.codeAccesSecret = ? AND u.motDePasse = ?`,
-    [matricule, sessionCode, password],
-    (err, row) => {
+     WHERE u.matricule = ? AND s.codeAccesSecret = ?`,
+    [matricule, sessionCode],
+    async (err, row) => {
       if (err) {
         return res.status(500).json({ error: err.message });
       }
       if (!row) {
         return res.status(400).json({ error: "Identifiants invalides ou session introuvable." });
+      }
+
+      const match = await bcrypt.compare(password, row.motDePasse);
+      if (!match) {
+        // Fallback for plaintext passwords during transition
+        if (password !== row.motDePasse) {
+          return res.status(400).json({ error: "Identifiants invalides ou session introuvable." });
+        }
       }
 
       if (row.estValidee) {
@@ -286,12 +531,40 @@ app.post('/api/student/login', (req, res) => {
         const start = new Date(row.dateHeureDebut);
         const end = new Date(start.getTime() + (row.dureeMinutes || 120) * 60000);
         const now = new Date();
+        if (now < start) {
+          const formattedStart = start.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          return res.status(403).json({ error: `L'épreuve n'a pas encore commencé. Ouverture prévue à ${formattedStart}.` });
+        }
         if (now > end) {
           return res.status(403).json({ error: "L'épreuve est déjà terminée et l'accès est fermé." });
         }
       }
 
-      res.json({ success: true, user: row });
+      const token = jwt.sign(
+        { id: row.studentId, role: 'Etudiant', copieId: row.copieId, sessionId: row.sessionId },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+
+      // Remove motDePasse before sending user object
+      delete row.motDePasse;
+
+      // Anti-triche: Masquer les bonnes réponses QCM à l'étudiant
+      if (row.enonceTexte) {
+        try {
+          const parsedQuestions = JSON.parse(row.enonceTexte);
+          if (Array.isArray(parsedQuestions)) {
+            parsedQuestions.forEach(q => {
+              if (q.typeReponse === 'qcm' && Array.isArray(q.options)) {
+                q.options.forEach(opt => delete opt.isCorrect);
+              }
+            });
+            row.enonceTexte = JSON.stringify(parsedQuestions);
+          }
+        } catch(e) {}
+      }
+
+      res.json({ success: true, token, user: row });
     }
   );
 });
@@ -299,7 +572,7 @@ app.post('/api/student/login', (req, res) => {
 // ================= COPIES AUTO-SAVE & SUBMIT =================
 
 // Synchronisation des réponses
-app.post('/api/copies/sync', (req, res) => {
+app.post('/api/copies/sync', authenticateToken, (req, res) => {
   const { copieId, answers, fluxUML } = req.body;
 
   db.run(
@@ -317,7 +590,7 @@ app.post('/api/copies/sync', (req, res) => {
 // ================= CORRECTIONS & RESULTATS =================
 
 // Récupérer les copies d'une session
-app.get('/api/sessions/:id/results', (req, res) => {
+app.get('/api/sessions/:id/results', authenticateToken, (req, res) => {
   const sessionId = req.params.id;
   db.all(
     `SELECT u.id as studentId, u.matricule, u.nom, u.prenom, u.email,
@@ -334,7 +607,7 @@ app.get('/api/sessions/:id/results', (req, res) => {
 });
 
 // Corriger une copie
-app.post('/api/copies/:id/grade', (req, res) => {
+app.post('/api/copies/:id/grade', authenticateToken, (req, res) => {
   const copieId = req.params.id;
   const { notesJSON, noteFinale, commentaire } = req.body;
   db.run(
@@ -348,7 +621,7 @@ app.post('/api/copies/:id/grade', (req, res) => {
 });
 
 // Auto-correction d'une copie (exécute le code et compare aux cas de tests)
-app.post('/api/copies/:id/auto-grade', (req, res) => {
+app.post('/api/copies/:id/auto-grade', authenticateToken, (req, res) => {
   const copieId = req.params.id;
 
   // 1. Récupérer la copie et l'épreuve associée
@@ -380,7 +653,7 @@ app.post('/api/copies/:id/auto-grade', (req, res) => {
 });
 
 // Soumettre définitivement la copie
-app.post('/api/copies/submit', (req, res) => {
+app.post('/api/copies/submit', authenticateToken, (req, res) => {
   const { copieId } = req.body;
   db.run(
     `UPDATE Copie SET estValidee = 1, horodatageDerniereModif = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -392,6 +665,11 @@ app.post('/api/copies/submit', (req, res) => {
       res.json({ success: true });
     }
   );
+});
+
+// ================= REACT CATCH-ALL ROUTE =================
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 // ================= LAUNCH SERVER =================

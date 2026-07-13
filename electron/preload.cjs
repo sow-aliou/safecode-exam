@@ -14,4 +14,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSessionResults: (sessionId) => ipcRenderer.invoke('get-session-results', sessionId),
   saveGrade: (copieId, notesJSON, noteFinale, commentaire) => ipcRenderer.invoke('save-grade', copieId, notesJSON, noteFinale, commentaire),
   sendEmail: (studentData, sessionCode) => ipcRenderer.invoke('send-email', studentData, sessionCode),
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  onExamCloseAttempt: (callback) => ipcRenderer.on('exam-close-attempt', callback),
 });

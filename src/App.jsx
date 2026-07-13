@@ -5,6 +5,7 @@ import TeacherAuth from './pages/TeacherAuth';
 import TeacherDashboard from './pages/TeacherDashboard';
 import CreateExam from './pages/CreateExam';
 import ExamRoom from './pages/ExamRoom';
+import LiveExamDashboard from './pages/LiveExamDashboard';
 import './index.css';
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/teacher/auth" element={<TeacherAuth />} />
         <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
         <Route path="/teacher/create-exam" element={<CreateExam />} />
+        <Route path="/teacher/live/:sessionId" element={<LiveExamDashboard />} />
         <Route path="/exam/:sessionCode" element={<ExamRoom />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

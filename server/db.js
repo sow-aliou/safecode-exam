@@ -1,24 +1,22 @@
-import sqlite3 from 'sqlite3';
+import { createClient } from '@libsql/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = path.join(__dirname, 'server_database.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Erreur de connexion SQLite serveur:', err.message);
-  } else {
-    console.log('Connecté à la base de données SQLite du serveur central.');
-    initServerDb();
-  }
+const dbUrl = process.env.TURSO_DATABASE_URL || `file:${path.join(__dirname, 'server_database.db')}`;
+const authToken = process.env.TURSO_AUTH_TOKEN;
+
+const db = createClient({
+  url: dbUrl,
+  authToken: authToken,
 });
 
-function initServerDb() {
-  db.serialize(() => {
-    // 1. Table Utilisateur (Enseignant et Etudiant)
-    db.run(`
+async function initServerDb() {
+  try {
+    // 1. Table Utilisateur
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS Utilisateur (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         matricule TEXT UNIQUE,
@@ -26,12 +24,12 @@ function initServerDb() {
         prenom TEXT,
         email TEXT UNIQUE,
         motDePasse TEXT,
-        typeUtilisateur TEXT -- 'Etudiant' ou 'Enseignant'
+        typeUtilisateur TEXT
       )
     `);
 
     // 2. Table Examen
-    db.run(`
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS Examen (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         enseignant_id INTEGER,
@@ -46,7 +44,7 @@ function initServerDb() {
     `);
 
     // 3. Table SessionExamen
-    db.run(`
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS SessionExamen (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         codeAccesSecret TEXT UNIQUE,
@@ -58,7 +56,7 @@ function initServerDb() {
     `);
 
     // 4. Table Copie
-    db.run(`
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS Copie (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         etudiant_id INTEGER,
@@ -70,19 +68,20 @@ function initServerDb() {
         notesJSON TEXT DEFAULT '{}',
         noteFinale REAL DEFAULT 0,
         commentaire TEXT DEFAULT '',
+        dernierPing DATETIME,
         FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id),
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id),
         UNIQUE(etudiant_id, session_id)
       )
-    `, () => {
-      // Pour les bases de données existantes, ajouter les colonnes si elles manquent
-      db.run("ALTER TABLE Copie ADD COLUMN notesJSON TEXT DEFAULT '{}'", (err) => {});
-      db.run("ALTER TABLE Copie ADD COLUMN noteFinale REAL DEFAULT 0", (err) => {});
-      db.run("ALTER TABLE Copie ADD COLUMN commentaire TEXT DEFAULT ''", (err) => {});
-    });
+    `);
+
+    try { await db.execute("ALTER TABLE Copie ADD COLUMN notesJSON TEXT DEFAULT '{}'"); } catch(e){}
+    try { await db.execute("ALTER TABLE Copie ADD COLUMN noteFinale REAL DEFAULT 0"); } catch(e){}
+    try { await db.execute("ALTER TABLE Copie ADD COLUMN commentaire TEXT DEFAULT ''"); } catch(e){}
+    try { await db.execute("ALTER TABLE Copie ADD COLUMN dernierPing DATETIME"); } catch(e){}
 
     // 5. Table JournalLog
-    db.run(`
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS JournalLog (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id INTEGER,
@@ -97,7 +96,7 @@ function initServerDb() {
     `);
 
     // 6. Table BanqueQuestions
-    db.run(`
+    await db.execute(`
       CREATE TABLE IF NOT EXISTS BanqueQuestions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         enseignant_id INTEGER,
@@ -106,10 +105,55 @@ function initServerDb() {
         points INTEGER,
         testCases TEXT DEFAULT '[]'
       )
-    `, () => {
-      db.run("ALTER TABLE BanqueQuestions ADD COLUMN testCases TEXT DEFAULT '[]'", () => {});
-    });
-  });
+    `);
+    
+    try { await db.execute("ALTER TABLE BanqueQuestions ADD COLUMN testCases TEXT DEFAULT '[]'"); } catch(e){}
+
+    console.log("Connecté à la base de données libSQL/Turso.");
+  } catch (err) {
+    console.error("Erreur d'initialisation libSQL:", err);
+  }
 }
 
-export default db;
+// Lancer l'init
+initServerDb();
+
+const dbWrapper = {
+  execute: async (sql) => await db.execute(sql),
+  run: (sql, params, cb) => {
+    if (typeof params === 'function') { cb = params; params = []; }
+    db.execute({ sql, args: params || [] })
+      .then(res => {
+        const lastID = res.lastInsertRowid ? Number(res.lastInsertRowid) : undefined;
+        if (cb) cb.call({ lastID }, null);
+      })
+      .catch(err => {
+        if (cb) cb(err);
+      });
+  },
+  get: (sql, params, cb) => {
+    if (typeof params === 'function') { cb = params; params = []; }
+    db.execute({ sql, args: params || [] })
+      .then(res => {
+        if (cb) cb(null, res.rows.length > 0 ? res.rows[0] : undefined);
+      })
+      .catch(err => {
+        if (cb) cb(err);
+      });
+  },
+  all: (sql, params, cb) => {
+    if (typeof params === 'function') { cb = params; params = []; }
+    db.execute({ sql, args: params || [] })
+      .then(res => {
+        if (cb) cb(null, res.rows);
+      })
+      .catch(err => {
+        if (cb) cb(err);
+      });
+  },
+  serialize: (cb) => {
+    if (cb) cb();
+  }
+};
+
+export default dbWrapper;

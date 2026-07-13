@@ -24,7 +24,9 @@ import {
   addQuestionToBankInDb,
   deleteQuestionFromBankInDb,
   getResultsForSessionFromDb,
-  saveGradeToDb
+  saveGradeToDb,
+  studentPingInDb,
+  getLiveStatusFromDb
 } from './db.js';
 
 // Pour gérer les modules ES dans Electron
@@ -61,6 +63,14 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  // Prevent closing when in exam mode
+  mainWindow.on('close', (e) => {
+    if (global.isExamMode) {
+      e.preventDefault();
+      mainWindow.webContents.send('exam-close-attempt');
+    }
+  });
 }
 
 app.whenReady().then(() => {
@@ -74,7 +84,7 @@ app.whenReady().then(() => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/copies/sync`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ copieId, answers: JSON.parse(code) })
         });
         const resData = await response.json();
@@ -89,13 +99,63 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle('submit-exam', async (event, copieId) => {
+    try {
+      try {
+        await fetch(`${BACKEND_URL}/api/copies/submit`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ copieId })
+        });
+      } catch (err) {
+        console.log("Serveur injoignable pour soumission finale, on ignore.");
+      }
+      return { success: true };
+    } catch (error) {
+      console.error("Erreur submit-exam:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  let authToken = null;
+  ipcMain.handle('set-auth-token', (event, token) => {
+    authToken = token;
+    return { success: true };
+  });
+
+  // Exam mode (Kiosk)
+  global.isExamMode = false;
+  ipcMain.handle('enter-exam-mode', () => {
+    global.isExamMode = true;
+    if (mainWindow) {
+      mainWindow.setKiosk(true);
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle('exit-exam-mode', () => {
+    global.isExamMode = false;
+    if (mainWindow) {
+      mainWindow.setKiosk(false);
+      mainWindow.setAlwaysOnTop(false);
+    }
+    return { success: true };
+  });
+
+  const getAuthHeaders = () => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    return headers;
+  };
+
   // Récupérer toutes les sessions d'examen (Serveur -> local)
   ipcMain.handle('get-sessions', async (event, teacherId) => {
     try {
       // Essayer de charger depuis le serveur central
       try {
         const url = teacherId ? `${BACKEND_URL}/api/sessions?teacherId=${teacherId}` : `${BACKEND_URL}/api/sessions`;
-        const response = await fetch(url);
+        const response = await fetch(url, { headers: getAuthHeaders() });
         const data = await response.json();
         if (data.success) {
           // Facultatif : on pourrait synchroniser les sessions reçues dans la base locale SQLite
@@ -123,7 +183,7 @@ app.whenReady().then(() => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/sessions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(sessionData)
         });
         const data = await response.json();
@@ -154,7 +214,7 @@ app.whenReady().then(() => {
       try {
         await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/exam`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(examData)
         });
       } catch (err) {
@@ -170,6 +230,48 @@ app.whenReady().then(() => {
     }
   });
 
+  // Ajouter du temps à une session (Serveur + local)
+  ipcMain.handle('add-session-time', async (event, { sessionId, additionalMinutes }) => {
+    try {
+      // 1. Envoyer au serveur central
+      try {
+        await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/add-time`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ additionalMinutes })
+        });
+      } catch (err) {
+        console.log("Erreur connexion serveur pour ajouter du temps.");
+      }
+
+      // 2. Mettre à jour localement
+      try {
+        await new Promise((resolve, reject) => {
+          db.get(`SELECT examen_id FROM SessionExamen WHERE id = ?`, [sessionId], (err, row) => {
+            if (err) return reject(err);
+            if (!row) return resolve(); // Session pas dans la DB locale, on ignore
+            
+            db.run(
+              `UPDATE Examen SET dureeMinutes = dureeMinutes + ? WHERE id = ?`,
+              [Number(additionalMinutes), row.examen_id],
+              (err2) => {
+                if (err2) return reject(err2);
+                resolve();
+              }
+            );
+          });
+        });
+      } catch (dbErr) {
+        console.log("Erreur mise à jour locale (ignorée):", dbErr.message);
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error("Erreur add-session-time:", error);
+      return { success: false, error: "Erreur lors de l'ajout de temps." };
+    }
+  });
+
   // Importer les étudiants (Serveur + local)
   ipcMain.handle('import-students', async (event, sessionId, students) => {
     try {
@@ -181,7 +283,7 @@ app.whenReady().then(() => {
         const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 seconds timeout
         const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/students`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ students }),
           signal: controller.signal
         });
@@ -210,7 +312,7 @@ app.whenReady().then(() => {
     try {
       // 1. Tenter depuis le serveur
       try {
-        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/students`);
+        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/students`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (data.success) return data;
       } catch (err) {
@@ -233,7 +335,7 @@ app.whenReady().then(() => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/student/login`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ matricule, sessionCode, password })
         });
         const data = await response.json();
@@ -250,6 +352,8 @@ app.whenReady().then(() => {
           await importStudentsToDb(data.user.sessionId, [studentObj]);
 
           return data;
+        } else if (data.error) {
+          return data;
         }
       } catch (err) {
         console.log("Erreur serveur pour student-login. Connexion mode offline via SQLite local...");
@@ -257,7 +361,9 @@ app.whenReady().then(() => {
 
       // 2. Fallback local SQLite (si l'élève a déjà été importé localement par le prof)
       const localUser = await studentLoginCheck(matricule, sessionCode, password);
-      if (localUser) {
+      if (localUser && localUser.error) {
+        return { success: false, error: localUser.error };
+      } else if (localUser) {
         return { success: true, user: localUser };
       } else {
         return { success: false, error: "Identifiants inconnus localement." };
@@ -268,11 +374,46 @@ app.whenReady().then(() => {
     }
   });
 
+  // ================= STUDENT LIVE TRACKING =================
+  ipcMain.handle('student-ping', async (event, copieId, etudiantId, sessionId, alerts) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/student/ping`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ copieId, etudiantId, sessionId, alerts })
+        });
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        // Fallback local
+      }
+      return await studentPingInDb(copieId, etudiantId, sessionId, alerts);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-live-status', async (event, sessionId) => {
+    try {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/live`, { headers: getAuthHeaders() });
+        const data = await response.json();
+        if (data.success) return data;
+      } catch (err) {
+        // Fallback local
+      }
+      return await getLiveStatusFromDb(sessionId);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // ================= BANQUE DE QUESTIONS =================
   ipcMain.handle('get-question-bank', async (event, teacherId) => {
     try {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/questionbank?teacherId=${teacherId}`);
+        const response = await fetch(`${BACKEND_URL}/api/questionbank?teacherId=${teacherId}`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (data.success) return data;
       } catch (err) {
@@ -290,7 +431,7 @@ app.whenReady().then(() => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/questionbank`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ teacherId, ...question })
         });
         const data = await response.json();
@@ -309,7 +450,8 @@ app.whenReady().then(() => {
     try {
       try {
         const response = await fetch(`${BACKEND_URL}/api/questionbank/${questionId}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: getAuthHeaders()
         });
         const data = await response.json();
         if (data.success) return data;
@@ -327,7 +469,7 @@ app.whenReady().then(() => {
   ipcMain.handle('get-session-results', async (event, sessionId) => {
     try {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/results`);
+        const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/results`, { headers: getAuthHeaders() });
         const data = await response.json();
         if (data.success) return data;
       } catch (err) {
@@ -345,7 +487,7 @@ app.whenReady().then(() => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/copies/${copieId}/grade`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ notesJSON, noteFinale, commentaire })
         });
         const data = await response.json();

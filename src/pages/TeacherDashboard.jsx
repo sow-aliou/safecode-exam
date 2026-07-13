@@ -68,7 +68,9 @@ export default function TeacherDashboard() {
         if (response.success) sessionsList = response.sessions;
       } else {
         const url = tId ? `http://localhost:3000/api/sessions?teacherId=${tId}` : 'http://localhost:3000/api/sessions';
-        const response = await fetch(url);
+        const token = sessionStorage.getItem('teacher_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const response = await fetch(url, { headers });
         const data = await response.json();
         if (data.success) sessionsList = data.sessions;
       }
@@ -110,7 +112,9 @@ export default function TeacherDashboard() {
         const res = await window.electronAPI.getSessionResults(sessionId);
         if (res.success) setSessionResults(res.results);
       } else {
-        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/results`);
+        const token = sessionStorage.getItem('teacher_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/results`, { headers });
         const data = await res.json();
         if (data.success) setSessionResults(data.results);
       }
@@ -140,8 +144,26 @@ export default function TeacherDashboard() {
   };
 
   useEffect(() => {
-    fetchSessions();
+    const token = sessionStorage.getItem('teacher_token');
+    if (!token) {
+      navigate('/teacher/auth');
+      return;
+    }
+    if (window.electronAPI) {
+      window.electronAPI.invoke('set-auth-token', token).then(() => fetchSessions());
+    } else {
+      fetchSessions();
+    }
   }, []);
+
+  // Auto-sélectionner la session la plus récente dans l'onglet résultats
+  useEffect(() => {
+    if (activeTab === 'results' && !selectedResultSession && sessions.length > 0) {
+      const sortedSessions = [...sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
+      setSelectedResultSession(sortedSessions[0].id.toString());
+      fetchSessionResults(sortedSessions[0].id);
+    }
+  }, [activeTab, selectedResultSession, sessions]);
 
   const handleLogout = () => { sessionStorage.clear(); navigate('/'); };
 
@@ -191,9 +213,13 @@ export default function TeacherDashboard() {
       }
     } else {
       try {
+        const token = sessionStorage.getItem('teacher_token');
         const response = await fetch('http://localhost:3000/api/sessions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify(sessionData)
         });
         const data = await response.json();
@@ -276,7 +302,9 @@ export default function TeacherDashboard() {
       }
     } else {
       try {
-        const response = await fetch(`http://localhost:3000/api/sessions/${session.id}/students`);
+        const token = sessionStorage.getItem('teacher_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const response = await fetch(`http://localhost:3000/api/sessions/${session.id}/students`, { headers });
         const data = await response.json();
         if (data.success && data.students.length > 0) {
           setImportedStudents(data.students.map(s => ({ ...s, statusEmail: 'Envoyé' })));
@@ -311,9 +339,13 @@ export default function TeacherDashboard() {
       if (window.electronAPI && selectedSession) {
         await window.electronAPI.importStudents(selectedSession.id, studentsWithCode);
       } else if (selectedSession) {
+        const token = sessionStorage.getItem('teacher_token');
         const response = await fetch(`http://localhost:3000/api/sessions/${selectedSession.id}/students`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({ students: studentsWithCode })
         });
         const data = await response.json();
@@ -398,9 +430,13 @@ export default function TeacherDashboard() {
           fetchSessionResults(selectedResultSession);
         }
       } else {
+        const token = sessionStorage.getItem('teacher_token');
         const res = await fetch(`http://localhost:3000/api/copies/${activeCopie.copieId}/grade`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({ notesJSON: currentGrades, noteFinale: finalScore, commentaire: currentComment })
         });
         const data = await res.json();
@@ -541,8 +577,10 @@ export default function TeacherDashboard() {
                 <div className="stat-label">{t('statClosed')}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value" style={{ color: '#f87171' }}>0</div>
-                <div className="stat-label">{t('statFraud')}</div>
+                <div className="stat-value" style={{ color: '#60a5fa' }}>
+                  {sessions.filter(s => s.status === 'pending').length}
+                </div>
+                <div className="stat-label">{lang === 'fr' ? 'À venir' : 'Pending'}</div>
               </div>
             </div>
 
@@ -633,23 +671,6 @@ export default function TeacherDashboard() {
                             <span className="session-meta-item">
                               📅 {session.date ? new Date(session.date).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                             </span>
-                            <span className="session-meta-item">⏱ {session.duree || 120} min</span>
-                            <span className="session-meta-item">👥 {session.totalStudents || 0} {t('studentsBtn').toLowerCase()}</span>
-                            
-                            {session.enonceTexte && (() => {
-                              try { return JSON.parse(session.enonceTexte).length > 0; } catch { return false; }
-                            })() && (
-                              <span className="session-meta-item" style={{ borderColor: 'rgba(99,102,241,0.3)' }}>
-                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                  ❓ {(() => { try { return JSON.parse(session.enonceTexte).length; } catch { return 0; }})()} question(s)
-                                </span>
-                              </span>
-                            )}
-                            {session.sujetPdfBase64 && (
-                              <span className="session-meta-item" style={{ borderColor: 'rgba(16,185,129,0.3)', color: 'var(--success)' }}>
-                                📎 PDF
-                              </span>
-                            )}
                           </div>
                         </div>
 
@@ -657,12 +678,54 @@ export default function TeacherDashboard() {
                           <div className="session-code-badge" title={t('sessionCodeTooltip')} style={{ margin: 0 }}>
                             {session.code}
                           </div>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title } })}
-                          >
-                            ✏️ {t('examBtn')}
-                          </button>
+                          
+                          {/* Actions pour les sessions EN COURS */}
+                          {session.status === 'active' && (
+                            <>
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => navigate(`/teacher/live/${session.id}`)}
+                                style={{ color: '#10b981', borderColor: 'rgba(16,185,129,0.3)' }}
+                              >
+                                📡 Direct
+                              </button>
+                            </>
+                          )}
+
+                          {/* Actions pour les sessions À VENIR (Pending) */}
+                          {session.status === 'pending' && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title } })}
+                            >
+                              ✏️ Modifier
+                            </button>
+                          )}
+
+                          {/* Actions pour les sessions TERMINÉES */}
+                          {session.status === 'closed' && (
+                            <>
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => {
+                                  setActiveTab('results');
+                                  setSelectedResultSession(session.id);
+                                  fetchSessionResults(session.id);
+                                }}
+                                style={{ color: '#8b5cf6', borderColor: 'rgba(139,92,246,0.3)' }}
+                              >
+                                📊 Résultats
+                              </button>
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => navigate('/teacher/create-exam', { state: { sessionId: session.id, sessionTitle: session.title, readOnly: true } })}
+                              >
+                                👁️ Épreuve
+                              </button>
+                            </>
+                          )}
+
+                          {/* Le bouton Étudiants est visible partout */}
                           <button
                             className="btn btn-sm"
                             onClick={() => handleOpenStudentsModal(session)}
@@ -698,7 +761,7 @@ export default function TeacherDashboard() {
                   fetchSessionResults(e.target.value);
                 }}>
                 <option value="">-- {t('resultsSelectSession').replace(':', '')} --</option>
-                {sessions.map(s => (
+                {[...sessions].sort((a, b) => new Date(b.date) - new Date(a.date)).map(s => (
                   <option key={s.id} value={s.id}>{s.title} ({s.code})</option>
                 ))}
               </select>
@@ -1047,6 +1110,35 @@ export default function TeacherDashboard() {
                             ) : (
                               <p style={{ color: 'var(--text-muted)', fontStyle: 'italic', padding: 16 }}>Aucun diagramme UML fourni.</p>
                             )}
+                          </div>
+                        ) : answerType === 'qcm' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {(q.options || []).map(opt => {
+                              let studentSelected = false;
+                              try { studentSelected = JSON.parse(answerContent || '[]').includes(opt.id); } catch(e){}
+                              
+                              const isExpected = opt.isCorrect;
+                              
+                              let bg = 'rgba(255,255,255,0.03)';
+                              let border = '1px solid rgba(255,255,255,0.05)';
+                              let icon = '⬜';
+                              
+                              if (studentSelected && isExpected) {
+                                bg = 'rgba(16,185,129,0.1)'; border = '1px solid var(--success)'; icon = '✅';
+                              } else if (studentSelected && !isExpected) {
+                                bg = 'rgba(244,63,94,0.1)'; border = '1px solid var(--danger)'; icon = '❌';
+                              } else if (!studentSelected && isExpected) {
+                                bg = 'rgba(245,158,11,0.1)'; border = '1px solid var(--warning)'; icon = '⚠️ (Manqué)';
+                              }
+                              
+                              return (
+                                <div key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: bg, border: border, borderRadius: 8 }}>
+                                  <span style={{ fontSize: '1.2rem' }}>{icon}</span>
+                                  <span style={{ fontSize: '0.95rem', color: '#fff', opacity: (studentSelected || isExpected) ? 1 : 0.6 }}>{opt.text}</span>
+                                </div>
+                              );
+                            })}
+                            {!answerContent && <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>(Aucune réponse sélectionnée)</p>}
                           </div>
                         ) : (
                           <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap' }}>

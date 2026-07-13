@@ -86,6 +86,7 @@ function initDb() {
         notesJSON TEXT DEFAULT '{}',
         noteFinale REAL DEFAULT 0,
         commentaire TEXT DEFAULT '',
+        dernierPing DATETIME,
         FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id),
         FOREIGN KEY (session_id) REFERENCES SessionExamen(id)
       )
@@ -94,6 +95,7 @@ function initDb() {
       db.run("ALTER TABLE Copie ADD COLUMN notesJSON TEXT DEFAULT '{}'", (err) => {});
       db.run("ALTER TABLE Copie ADD COLUMN noteFinale REAL DEFAULT 0", (err) => {});
       db.run("ALTER TABLE Copie ADD COLUMN commentaire TEXT DEFAULT ''", (err) => {});
+      db.run("ALTER TABLE Copie ADD COLUMN dernierPing DATETIME", (err) => {});
     });
 
     // 6. Table JournalLog
@@ -101,13 +103,17 @@ function initDb() {
       CREATE TABLE IF NOT EXISTS JournalLog (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id INTEGER,
+        etudiant_id INTEGER,
         horodatage DATETIME DEFAULT CURRENT_TIMESTAMP,
         typeEvenement TEXT,
         description TEXT,
         criticite TEXT,
-        FOREIGN KEY (session_id) REFERENCES SessionExamen(id)
+        FOREIGN KEY (session_id) REFERENCES SessionExamen(id),
+        FOREIGN KEY (etudiant_id) REFERENCES Utilisateur(id)
       )
-    `);
+    `, () => {
+        db.run("ALTER TABLE JournalLog ADD COLUMN etudiant_id INTEGER REFERENCES Utilisateur(id)", (err) => {});
+    });
 
     // 7. Table BanqueQuestions
     db.run(`
@@ -263,7 +269,7 @@ export function importStudentsToDb(sessionId, students) {
 export function getStudentsForSessionFromDb(sessionId) {
   return new Promise((resolve, reject) => {
     db.all(`
-      SELECT u.id, u.matricule, u.nom, u.prenom, u.email, u.motDePasse as codeSecret, c.id as copieId
+      SELECT u.id, u.matricule, u.nom, u.prenom, u.email, '***' as codeSecret, c.id as copieId
       FROM Copie c
       JOIN Utilisateur u ON c.etudiant_id = u.id
       WHERE c.session_id = ?
@@ -278,15 +284,39 @@ export function getStudentsForSessionFromDb(sessionId) {
 export function studentLoginCheck(matricule, sessionCode, password) {
   return new Promise((resolve, reject) => {
     db.get(`
-      SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64
+      SELECT u.id as studentId, u.matricule, u.nom, u.prenom, s.id as sessionId, c.id as copieId, e.titre, e.dureeMinutes, e.instructions, e.langageCible, e.sujetPdfBase64, s.dateHeureDebut
       FROM Utilisateur u
       JOIN Copie c ON c.etudiant_id = u.id
       JOIN SessionExamen s ON c.session_id = s.id
       JOIN Examen e ON s.examen_id = e.id
       WHERE u.matricule = ? AND s.codeAccesSecret = ? AND u.motDePasse = ?
     `, [matricule, sessionCode, password], (err, row) => {
-      if (err) reject(err);
-      else resolve(row || null);
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!row) {
+        resolve(null);
+        return;
+      }
+
+      if (row.dateHeureDebut) {
+        const start = new Date(row.dateHeureDebut);
+        const end = new Date(start.getTime() + (row.dureeMinutes || 120) * 60000);
+        const now = new Date();
+        if (now < start) {
+          const formattedStart = start.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          resolve({ error: `L'épreuve n'a pas encore commencé. Ouverture prévue à ${formattedStart}.` });
+          return;
+        }
+        if (now > end) {
+          resolve({ error: "L'épreuve est déjà terminée et l'accès est fermé." });
+          return;
+        }
+      }
+      
+      resolve(row);
     });
   });
 }
@@ -378,6 +408,55 @@ export function saveGradeToDb(copieId, notesJSON, noteFinale, commentaire) {
       function (err) {
         if (err) reject(err);
         else resolve({ success: true });
+      }
+    );
+  });
+}
+
+// ================= LIVE TRACKING =================
+
+export function studentPingInDb(copieId, etudiantId, sessionId, alerts) {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run(`UPDATE Copie SET dernierPing = CURRENT_TIMESTAMP WHERE id = ?`, [copieId]);
+      
+      if (alerts && alerts.length > 0) {
+        const stmt = db.prepare(`INSERT INTO JournalLog (session_id, etudiant_id, typeEvenement, description, criticite) VALUES (?, ?, ?, ?, ?)`);
+        alerts.forEach(alert => {
+          stmt.run([sessionId, etudiantId, alert.type, alert.description, alert.criticite || 'Avertissement']);
+        });
+        stmt.finalize(err => {
+          if (err) reject(err);
+          else resolve({ success: true });
+        });
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+}
+
+export function getLiveStatusFromDb(sessionId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT c.id as copieId, u.id as studentId, u.nom, u.prenom, u.matricule, c.estValidee, c.dernierPing
+       FROM Copie c
+       JOIN Utilisateur u ON c.etudiant_id = u.id
+       WHERE c.session_id = ?`,
+      [sessionId],
+      (err, students) => {
+        if (err) return reject(err);
+        
+        db.all(
+          `SELECT id, etudiant_id, horodatage, typeEvenement, description, criticite 
+           FROM JournalLog 
+           WHERE session_id = ? ORDER BY horodatage DESC`,
+          [sessionId],
+          (err2, logs) => {
+            if (err2) return reject(err2);
+            resolve({ success: true, students, logs });
+          }
+        );
       }
     );
   });

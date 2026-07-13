@@ -6,15 +6,16 @@ const TYPE_CONFIG = {
   texte: { label: 'Texte', icon: '📝', btnClass: 'active-text' },
   code:  { label: 'Code',  icon: '💻', btnClass: 'active-code' },
   uml:   { label: 'UML',   icon: '📐', btnClass: 'active-uml' },
+  qcm:   { label: 'QCM',   icon: '☑️', btnClass: 'active-qcm' },
 };
 
-const emptyQuestion = () => ({ id: Date.now(), enonce: '', typeReponse: 'texte', points: 0, testCases: [] });
+const emptyQuestion = () => ({ id: Date.now(), enonce: '', typeReponse: 'texte', points: 0, testCases: [], options: [{ id: Date.now() + 1, text: 'Option A', isCorrect: false }, { id: Date.now() + 2, text: 'Option B', isCorrect: false }] });
 
 export default function CreateExam() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, lang } = useTranslation();
-  const { sessionId = null, sessionTitle = 'Nouvelle épreuve' } = location.state || {};
+  const { sessionId = null, sessionTitle = 'Nouvelle épreuve', readOnly = false } = location.state || {};
 
   const [questions, setQuestions] = useState([emptyQuestion()]);
   const [isFinished, setIsFinished] = useState(false);
@@ -45,7 +46,9 @@ export default function CreateExam() {
           // Si nous sommes sur Electron, nous devrions récupérer les détails de la session
           // La route /api/sessions/:id/exam est accessible.
         }
-        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`);
+        const token = sessionStorage.getItem('teacher_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`, { headers });
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.exam) {
@@ -137,9 +140,13 @@ export default function CreateExam() {
       if (window.electronAPI && sessionId) {
         await window.electronAPI.updateSessionExam(sessionId, examData);
       } else if (sessionId) {
+        const token = sessionStorage.getItem('teacher_token');
         const response = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify(examData)
         });
         const data = await response.json();
@@ -161,6 +168,9 @@ export default function CreateExam() {
     );
   }
 
+  const isFullyDisabled = readOnly;
+  const isContentDisabled = isFinished || readOnly;
+
   return (
     <div className="gradient-bg" style={{ minHeight: '100vh', paddingBottom: 60 }}>
       {/* Topbar */}
@@ -168,16 +178,22 @@ export default function CreateExam() {
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/teacher/dashboard')}>
           ← {t('createExamBack')}
         </button>
-        <div className="topbar-logo"><span>✏️ {t('createExamTitle')}</span></div>
+        <div className="topbar-logo"><span>{readOnly ? '👁️ Épreuve (Lecture Seule)' : `✏️ ${t('createExamTitle')}`}</span></div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn btn-primary btn-sm" onClick={handleSave}>
-            {saved ? `✅ ${t('createExamPublished')}` : `💾 ${t('createExamPublish')}`}
-          </button>
-          {isFinished && (
+          {!readOnly && (
+            <button className="btn btn-primary btn-sm" onClick={handleSave}>
+              {saved ? `✅ ${t('createExamPublished')}` : `💾 ${t('createExamPublish')}`}
+            </button>
+          )}
+          {readOnly ? (
+            <div style={{ color: '#8b5cf6', padding: '6px 12px', background: 'rgba(139,92,246,0.1)', borderRadius: 4, fontSize: '0.85rem', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>
+              🔒 Mode Consultation
+            </div>
+          ) : isFinished ? (
             <div style={{ color: '#ef4444', padding: '6px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 4, fontSize: '0.85rem', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>
               🔒 Épreuve terminée (Dates modifiables)
             </div>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -199,22 +215,22 @@ export default function CreateExam() {
               <label className="form-label">{t('createExamTitreLabel')}</label>
               <input className="form-input" value={examInfo.titre}
                 onChange={e => setExamInfo({...examInfo, titre: e.target.value})}
-                placeholder="ex: Examen Final" disabled={isFinished} />
+                placeholder="ex: Examen Final" disabled={isContentDisabled} />
             </div>
             <div className="form-group">
               <label className="form-label">{t('dateLabel')}</label>
               <input className="form-input" type="date" value={examInfo.examDate || ''}
-                onChange={e => setExamInfo({...examInfo, examDate: e.target.value})} />
+                onChange={e => setExamInfo({...examInfo, examDate: e.target.value})} disabled={isFullyDisabled} />
             </div>
             <div className="form-group">
               <label className="form-label">{t('startTimeLabel')}</label>
               <input className="form-input" type="time" value={examInfo.examTime || ''}
-                onChange={e => setExamInfo({...examInfo, examTime: e.target.value})} />
+                onChange={e => setExamInfo({...examInfo, examTime: e.target.value})} disabled={isFullyDisabled} />
             </div>
             <div className="form-group">
               <label className="form-label">{t('createExamDurationLabel')}</label>
               <input className="form-input" type="number" value={examInfo.dureeMinutes} min={15}
-                onChange={e => setExamInfo({...examInfo, dureeMinutes: e.target.value})} />
+                onChange={e => setExamInfo({...examInfo, dureeMinutes: e.target.value})} disabled={isFullyDisabled} />
             </div>
           </div>
           <div className="form-group" style={{ marginTop: 16 }}>
@@ -225,7 +241,7 @@ export default function CreateExam() {
             <textarea className="form-textarea" rows={6}
               placeholder="Ex: Le but de cet exercice est de concevoir le système d'information de l'entreprise..."
               value={examInfo.instructions}
-              onChange={e => setExamInfo({...examInfo, instructions: e.target.value})} disabled={isFinished} />
+              onChange={e => setExamInfo({...examInfo, instructions: e.target.value})} disabled={isContentDisabled} />
           </div>
         </div>
 
@@ -240,11 +256,11 @@ export default function CreateExam() {
           </p>
 
           {!examInfo.sujetPdfBase64 ? (
-            <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius)', padding: '40px 20px', textAlign: 'center', cursor: isFinished ? 'not-allowed' : 'pointer', background: 'rgba(255,255,255,0.01)', transition: 'all 0.2s', position: 'relative' }}
-              onMouseOver={e => !isFinished && (e.currentTarget.style.borderColor = 'var(--accent)')}
+            <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius)', padding: '40px 20px', textAlign: 'center', cursor: isContentDisabled ? 'not-allowed' : 'pointer', background: 'rgba(255,255,255,0.01)', transition: 'all 0.2s', position: 'relative' }}
+              onMouseOver={e => !isContentDisabled && (e.currentTarget.style.borderColor = 'var(--accent)')}
               onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-              <input type="file" accept="application/pdf" onChange={handlePdfUpload} disabled={isFinished}
-                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: isFinished ? 'not-allowed' : 'pointer' }} />
+              <input type="file" accept="application/pdf" onChange={handlePdfUpload} disabled={isContentDisabled}
+                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: isContentDisabled ? 'not-allowed' : 'pointer' }} />
               <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: 12 }}>📥</span>
               <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: 4 }}>{t('createExamPdfPlaceholder')}</p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>PDF (Max: 5 Mo)</p>
@@ -256,7 +272,7 @@ export default function CreateExam() {
                 <div>
                   <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{examInfo.sujetPdfName || 'Sujet Examen.pdf'}</p>
                   <p style={{ fontSize: '0.75rem', color: 'var(--success)' }}>✅ {t('createExamPdfSuccess')}</p>
-                  {!isFinished && (
+                  {!isContentDisabled && (
                     <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
                       <button className="btn btn-ghost btn-sm" onClick={removePdf} style={{ color: 'var(--danger)', padding: 0 }}>
                         ✕ Supprimer
@@ -274,7 +290,7 @@ export default function CreateExam() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             ❓ {t('createExamQuestionsTitle')} ({questions.length})
           </h2>
-          {!isFinished && (
+          {!isContentDisabled && (
             <div style={{ display: 'flex', gap: 12 }}>
               <button id="btn-add-question" className="btn btn-primary btn-sm" onClick={addQuestion} style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-dark))', border: 'none', padding: '10px 20px', borderRadius: 12, fontWeight: 700, color: '#fff', boxShadow: '0 4px 15px rgba(16,185,129,0.3)' }}>
                 {t('createExamAddQ')}
@@ -304,9 +320,9 @@ export default function CreateExam() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.03)', padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)' }}>
                     <label className="form-label" style={{ margin: 0, whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{t('createExamPoints')}</label>
                     <input type="number" min="1" className="form-input" style={{ width: 70, background: 'transparent', border: 'none', color: '#fff', fontWeight: 700, padding: 0, textAlign: 'right' }}
-                      value={q.points} onChange={e => updateQuestion(q.id, 'points', e.target.value)} disabled={isFinished} />
+                      value={q.points} onChange={e => updateQuestion(q.id, 'points', e.target.value)} disabled={isContentDisabled} />
                   </div>
-                  {!isFinished && (
+                  {!isContentDisabled && (
                     <button className="btn btn-ghost btn-sm" style={{ color: '#f43f5e', background: 'rgba(244,63,94,0.1)', padding: '8px', borderRadius: 10 }}
                       onClick={() => deleteQuestion(q.id)} type="button" title="Supprimer la question">
                       🗑️
@@ -321,8 +337,81 @@ export default function CreateExam() {
                   style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)' }}
                   placeholder={`${t('createExamStatementPlaceholder')} ${index + 1}...`}
                   value={q.enonce}
-                  onChange={e => updateQuestion(q.id, 'enonce', e.target.value)} disabled={isFinished} />
+                  onChange={e => updateQuestion(q.id, 'enonce', e.target.value)} disabled={isContentDisabled} />
               </div>
+              
+              <div className="form-group" style={{ marginTop: 16 }}>
+                <label className="form-label" style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Type de réponse attendue</label>
+                <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                  {Object.entries(TYPE_CONFIG).map(([key, config]) => (
+                    <button key={key} type="button"
+                      className={`btn btn-sm ${q.typeReponse === key ? 'btn-primary' : 'btn-ghost'}`}
+                      style={{ 
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        opacity: isContentDisabled ? 0.6 : 1,
+                        background: q.typeReponse === key ? 'linear-gradient(135deg, var(--accent), var(--accent-dark))' : 'rgba(255,255,255,0.05)'
+                      }}
+                      disabled={isContentDisabled}
+                      onClick={() => updateQuestion(q.id, 'typeReponse', key)}>
+                      <span>{config.icon}</span> {config.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {q.typeReponse === 'qcm' && (
+                <div className="form-group" style={{ marginTop: 24, padding: 16, background: 'rgba(0,0,0,0.15)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <label className="form-label" style={{ color: 'var(--accent-light)' }}>Options du QCM</label>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>Cochez la ou les bonnes réponses.</p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {(q.options || []).map((opt, optIndex) => (
+                      <div key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input type="checkbox" checked={opt.isCorrect} 
+                          disabled={isContentDisabled}
+                          style={{ width: 20, height: 20, accentColor: 'var(--success)' }}
+                          onChange={e => {
+                            const newOptions = [...q.options];
+                            newOptions[optIndex].isCorrect = e.target.checked;
+                            updateQuestion(q.id, 'options', newOptions);
+                          }} 
+                        />
+                        <input type="text" className="form-input" 
+                          placeholder={`Option ${optIndex + 1}`}
+                          value={opt.text}
+                          disabled={isContentDisabled}
+                          style={{ flex: 1, padding: '8px 12px' }}
+                          onChange={e => {
+                            const newOptions = [...q.options];
+                            newOptions[optIndex].text = e.target.value;
+                            updateQuestion(q.id, 'options', newOptions);
+                          }} 
+                        />
+                        {!isContentDisabled && q.options.length > 2 && (
+                          <button className="btn btn-ghost btn-sm" type="button" 
+                            style={{ color: '#f43f5e', padding: '6px' }}
+                            onClick={() => {
+                              const newOptions = q.options.filter(o => o.id !== opt.id);
+                              updateQuestion(q.id, 'options', newOptions);
+                            }}>
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {!isContentDisabled && (
+                    <button className="btn btn-ghost btn-sm" type="button" style={{ marginTop: 12, color: 'var(--accent-light)' }}
+                      onClick={() => {
+                        const newOptions = [...(q.options || []), { id: Date.now(), text: `Option ${(q.options?.length || 0) + 1}`, isCorrect: false }];
+                        updateQuestion(q.id, 'options', newOptions);
+                      }}>
+                      + Ajouter une option
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

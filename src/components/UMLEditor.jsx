@@ -10,7 +10,17 @@ const SIZES = {
   note: { w: 150, h: 80 },
   system_boundary: { w: 300, h: 400 },
   activation: { w: 20, h: 100 },
-  fragment: { w: 300, h: 200 }
+  fragment: { w: 300, h: 200 },
+  text: { w: 100, h: 40 },
+  interface: { w: 120, h: 80 },
+  component: { w: 160, h: 100 },
+  node: { w: 140, h: 120 },
+  destroy: { w: 40, h: 40 },
+  start: { w: 30, h: 30 },
+  end: { w: 40, h: 40 },
+  decision: { w: 60, h: 60 },
+  fork_h: { w: 100, h: 10 },
+  fork_v: { w: 10, h: 100 }
 };
 
 export default function UMLEditor({ value, onChange, readOnly = false }) {
@@ -27,7 +37,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
   // État de drag-and-drop
   const [draggedNodeId, setDraggedNodeId] = useState(null);
   const dragOffset = useRef({ x: 0, y: 0 });
-  
+
   // État de redimensionnement
   const [resizingNodeId, setResizingNodeId] = useState(null);
   const resizeStart = useRef({ w: 0, h: 0, x: 0, y: 0 });
@@ -57,7 +67,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
   // ─── Notification parent (debounce/sauvegarde) ───
   const updateParent = useCallback((newNodes, newEdges) => {
     if (readOnly) return;
-    
+
     // Génération automatique d'une description textuelle de secours
     let textRep = "";
     newNodes.forEach(n => {
@@ -85,7 +95,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
   // ─── Actions sur les Noeuds ───
   const handleAddNode = (type) => {
     if (readOnly) return;
-    
+
     let defaultName = "Nouvel Élément";
     if (type === 'class') defaultName = `Classe_${nodes.length + 1}`;
     if (type === 'actor') defaultName = "Acteur";
@@ -96,6 +106,16 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
     if (type === 'system_boundary') defaultName = "Système";
     if (type === 'activation') defaultName = "";
     if (type === 'fragment') defaultName = "alt";
+    if (type === 'text') defaultName = "Texte";
+    if (type === 'interface') defaultName = "«interface»\\nNom";
+    if (type === 'component') defaultName = "Composant";
+    if (type === 'node') defaultName = "Nœud";
+    if (type === 'destroy') defaultName = "";
+    if (type === 'start') defaultName = "";
+    if (type === 'end') defaultName = "";
+    if (type === 'decision') defaultName = "";
+    if (type === 'fork_h') defaultName = "";
+    if (type === 'fork_v') defaultName = "";
 
     const newNode = {
       id: String(Date.now()),
@@ -106,7 +126,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
       x: 50 + (nodes.length * 30) % 300,
       y: 50 + (nodes.length * 20) % 200
     };
-    
+
     const updatedNodes = [...nodes, newNode];
     setNodes(updatedNodes);
     setSelectedNodeId(newNode.id);
@@ -239,7 +259,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
       const mouseY = e.clientY - rect.top + containerRef.current.scrollTop;
       const dx = mouseX - resizeStart.current.x;
       const dy = mouseY - resizeStart.current.y;
-      
+
       setNodes(prev => prev.map(n => {
         if (n.id === resizingNodeId) {
           return {
@@ -295,7 +315,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
     } else {
       iy = dy > 0 ? toNode.y : toNode.y + sTo.h;
     }
-    
+
     if (toNode.type === 'actor' || toNode.type === 'use_case') {
       const angle = Math.atan2(cy2 - cy1, cx2 - cx1);
       ix = cx2 - (sTo.w/2) * Math.cos(angle);
@@ -394,6 +414,80 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
             <rect width={s.w} height={s.h} fill="#e2e8f0" stroke="#475569" strokeWidth="1" />
           </g>
         );
+      case 'text':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} fill="transparent" />
+            <text x={s.w/2} y={s.h/2 + 4} fill="#fff" fontSize="14" textAnchor="middle">{n.name}</text>
+          </g>
+        );
+      case 'interface':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} rx="6" fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} style={{ filter: isSelected ? 'drop-shadow(0 4px 12px rgba(99,102,241,0.25))' : 'none' }} />
+            <text x={s.w/2} y="20" fill="#fff" fontSize="12" textAnchor="middle">{n.name.split('\\n')[0]}</text>
+            <text x={s.w/2} y="36" fill="#fff" fontWeight="bold" fontSize="12" textAnchor="middle">{n.name.split('\\n')[1] || ''}</text>
+          </g>
+        );
+      case 'component':
+        return (
+          <g>
+            <rect x="10" width={s.w - 10} height={s.h} fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} />
+            <rect x="0" y="20" width="20" height="15" fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} />
+            <rect x="0" y={s.h - 35} width="20" height="15" fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} />
+            <text x={10 + (s.w - 10)/2} y={s.h/2 + 4} fill="#fff" fontWeight="bold" fontSize="12" textAnchor="middle">{n.name}</text>
+          </g>
+        );
+      case 'node':
+        return (
+          <g>
+            <path d={`M 15,0 L ${s.w},0 L ${s.w},${s.h - 15} L ${s.w - 15},${s.h} L 0,${s.h} L 0,15 Z`} fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} />
+            <path d={`M 0,15 L 15,0 M ${s.w - 15},15 L ${s.w},0 M 0,15 L ${s.w - 15},15 L ${s.w - 15},${s.h}`} fill="none" stroke={strokeColor} strokeWidth={strokeW} />
+            <text x={s.w/2} y={s.h/2 + 4} fill="#fff" fontWeight="bold" fontSize="12" textAnchor="middle">{n.name}</text>
+          </g>
+        );
+      case 'destroy':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} fill="transparent" />
+            <line x1="0" y1="0" x2={s.w} y2={s.h} stroke={strokeColor} strokeWidth="3" />
+            <line x1={s.w} y1="0" x2="0" y2={s.h} stroke={strokeColor} strokeWidth="3" />
+          </g>
+        );
+      case 'start':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} fill="transparent" />
+            <circle cx={s.w/2} cy={s.h/2} r={s.w/2 - 2} fill="#22c55e" stroke={strokeColor} strokeWidth={strokeW} />
+          </g>
+        );
+      case 'end':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} fill="transparent" />
+            <circle cx={s.w/2} cy={s.h/2} r={s.w/2 - 2} fill="transparent" stroke={strokeColor} strokeWidth={strokeW} />
+            <circle cx={s.w/2} cy={s.h/2} r={s.w/2 - 8} fill="#ef4444" stroke={strokeColor} strokeWidth={strokeW} />
+          </g>
+        );
+      case 'decision':
+        return (
+          <g>
+            <polygon points={`${s.w/2},0 ${s.w},${s.h/2} ${s.w/2},${s.h} 0,${s.h/2}`} fill={fillBG} stroke={strokeColor} strokeWidth={strokeW} />
+            <text x={s.w/2} y={s.h/2 + 4} fill="#fff" fontSize="11" textAnchor="middle">{n.name}</text>
+          </g>
+        );
+      case 'fork_h':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} rx="2" fill="#fff" stroke={strokeColor} strokeWidth="1" />
+          </g>
+        );
+      case 'fork_v':
+        return (
+          <g>
+            <rect width={s.w} height={s.h} rx="2" fill="#fff" stroke={strokeColor} strokeWidth="1" />
+          </g>
+        );
       case 'class':
       default:
         return (
@@ -441,10 +535,10 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
     minY = Math.max(0, minY - pad);
     const width = (maxX + pad) - minX;
     const height = (maxY + pad) - minY;
-    return { 
-      width: readOnly ? '100%' : 3000, 
-      height: readOnly ? '100%' : 3000, 
-      viewBox: readOnly ? `${minX} ${minY} ${width} ${height}` : undefined 
+    return {
+      width: readOnly ? '100%' : 3000,
+      height: readOnly ? '100%' : 3000,
+      viewBox: readOnly ? `${minX} ${minY} ${width} ${height}` : undefined
     };
   };
   const svgConfig = getBoundingBox();
@@ -453,7 +547,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
     <div style={{ display: 'flex', gap: 16, height: '100%', minHeight: 480, width: '100%' }}>
       {/* Canevas SVG */}
       <div style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: '#040710', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        
+
         {/* Barre d'outils */}
         {!readOnly && (
           <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', display: 'flex', gap: 8, alignItems: 'center', zIndex: 10, flexWrap: 'wrap' }}>
@@ -468,11 +562,11 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleAddNode('activity')} title="Activité">🔄 Activité</button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleAddNode('note')} title="Note">📝 Note</button>
             </div>
-            
+
             <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
 
-            <button 
-              type="button" 
+            <button
+              type="button"
               className={`btn btn-ghost btn-sm ${isLinking ? 'active' : ''}`}
               onClick={handleStartLink}
               style={{ borderColor: isLinking ? 'var(--accent)' : 'transparent', background: isLinking ? 'rgba(99,102,241,0.1)' : 'transparent' }}
@@ -488,7 +582,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
         )}
 
         <div ref={containerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} style={{ flex: 1, overflow: 'auto', background: '#040710', minHeight: 0 }}>
-          <svg 
+          <svg
             width={svgConfig.width}
             height={svgConfig.height}
             viewBox={svgConfig.viewBox}
@@ -531,7 +625,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
               const labelFrom = getLabelCoords(start, end, 0.15);
               const labelTo = getLabelCoords(start, end, 0.85);
               const labelCenter = getLabelCoords(start, end, 0.5); // Center for include/extend labels
-              
+
               // Sélection du marqueur SVG (flèche)
               let markerEnd = `url(#association)`;
               if (e.type === 'generalization' || e.type === 'realization') markerEnd = `url(#generalization)`;
@@ -543,22 +637,22 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
               return (
                 <g key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedEdgeId(e.id); setSelectedNodeId(null); }} style={{ cursor: 'pointer' }}>
                   <path d={`M ${start.x} ${start.y} L ${end.x} ${end.y}`} stroke="transparent" strokeWidth="15" />
-                  <path 
-                    d={`M ${start.x} ${start.y} L ${end.x} ${end.y}`} 
-                    stroke={isSelected ? 'var(--accent)' : '#8b5cf6'} 
-                    strokeWidth={isSelected ? '3' : '1.8'} 
+                  <path
+                    d={`M ${start.x} ${start.y} L ${end.x} ${end.y}`}
+                    stroke={isSelected ? 'var(--accent)' : '#8b5cf6'}
+                    strokeWidth={isSelected ? '3' : '1.8'}
                     strokeDasharray={isDashed ? '6,6' : 'none'}
                     markerEnd={markerEnd}
                   />
                   {e.type === 'include' && <text x={labelCenter.x} y={labelCenter.y - 8} fill="#94a3b8" fontSize="11" fontWeight="bold" textAnchor="middle">&lt;&lt;include&gt;&gt;</text>}
                   {e.type === 'extend' && <text x={labelCenter.x} y={labelCenter.y - 8} fill="#94a3b8" fontSize="11" fontWeight="bold" textAnchor="middle">&lt;&lt;extend&gt;&gt;</text>}
                   {e.fromMultiplicity && (
-                    <text 
-                      x={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? labelCenter.x : labelFrom.x} 
-                      y={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? labelCenter.y - 8 : labelFrom.y} 
-                      fill="#94a3b8" 
-                      fontSize={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? "11" : "10"} 
-                      fontWeight="bold" 
+                    <text
+                      x={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? labelCenter.x : labelFrom.x}
+                      y={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? labelCenter.y - 8 : labelFrom.y}
+                      fill="#94a3b8"
+                      fontSize={['dependency', 'sync_message', 'return_message', 'include', 'extend'].includes(e.type) ? "11" : "10"}
+                      fontWeight="bold"
                       textAnchor="middle"
                     >
                       {e.fromMultiplicity}
@@ -579,7 +673,7 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
               const defaultSize = SIZES[n.type || 'class'] || SIZES.class;
               const s = { w: n.w || defaultSize.w, h: n.h || defaultSize.h };
               return (
-                <g 
+                <g
                   key={n.id}
                   transform={`translate(${n.x}, ${n.y})`}
                   onClick={(ev) => { ev.stopPropagation(); handleNodeClick(n.id); }}
@@ -588,15 +682,15 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
                 >
                   <rect width={s.w} height={n.type === 'lifeline' ? 400 : s.h} fill="transparent" />
                   {renderNodeShape(n, selectedNodeId === n.id, linkingSourceId === n.id)}
-                  
+
                   {/* Poignée de redimensionnement */}
                   {!readOnly && selectedNodeId === n.id && (
-                    <rect 
-                      x={s.w - 8} 
-                      y={(n.type === 'lifeline' ? 400 : s.h) - 8} 
-                      width="16" 
-                      height="16" 
-                      fill="var(--accent)" 
+                    <rect
+                      x={s.w - 8}
+                      y={(n.type === 'lifeline' ? 400 : s.h) - 8}
+                      width="16"
+                      height="16"
+                      fill="var(--accent)"
                       style={{ cursor: 'nwse-resize' }}
                       onMouseDown={(ev) => handleResizeMouseDown(ev, n.id)}
                     />
@@ -611,26 +705,26 @@ export default function UMLEditor({ value, onChange, readOnly = false }) {
       {/* Panneau Latéral (Configuration) */}
       {!readOnly && (activeNode || activeEdge) && (
         <div className="glass-card animate-fade-in" style={{ width: 250, padding: 16, display: 'flex', flexDirection: 'column', gap: 14, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)', maxHeight: '100%', overflowY: 'auto' }}>
-          
+
           {/* Config Noeud */}
           {activeNode && (
             <>
               <h3 style={{ fontSize: '0.95rem', margin: 0, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>✏️ Élément</h3>
-              
+
               <div className="form-group">
                 <label className="form-label" style={{ fontSize: '0.75rem' }}>Nom / Texte</label>
                 {activeNode.type === 'note' ? (
-                  <textarea 
-                    className="form-input" 
+                  <textarea
+                    className="form-input"
                     rows={4}
-                    value={activeNode.name} 
-                    onChange={e => handleUpdateNode(activeNode.id, 'name', e.target.value)} 
+                    value={activeNode.name}
+                    onChange={e => handleUpdateNode(activeNode.id, 'name', e.target.value)}
                   />
                 ) : (
-                  <input 
-                    className="form-input" 
-                    value={activeNode.name} 
-                    onChange={e => handleUpdateNode(activeNode.id, 'name', e.target.value)} 
+                  <input
+                    className="form-input"
+                    value={activeNode.name}
+                    onChange={e => handleUpdateNode(activeNode.id, 'name', e.target.value)}
                   />
                 )}
               </div>

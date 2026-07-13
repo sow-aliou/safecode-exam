@@ -81,7 +81,8 @@ export default function ExamRoom() {
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers]   = useState({});
   const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [showPdf, setShowPdf]   = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [pdfOpen, setPdfOpen] = useState(true);
   const [lastSaved, setLastSaved] = useState(null);
   const [saving, setSaving]     = useState(false);
   const [timeExpired, setTimeExpired] = useState(false);
@@ -97,6 +98,9 @@ export default function ExamRoom() {
 
   // ── Chargement de l'épreuve depuis le sessionStorage ────────────────────
   useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.invoke('enter-exam-mode');
+    }
     const raw = sessionStorage.getItem('exam_data');
     if (!raw) { navigate('/'); return; }
 
@@ -142,6 +146,23 @@ export default function ExamRoom() {
     setAnswers(initialAnswers);
   }, [navigate]);
 
+  // ── Anti-Triche : Blocage des raccourcis et clic droit ───────────────────
+  useEffect(() => {
+    const blockAction = (e) => e.preventDefault();
+    
+    document.addEventListener('copy', blockAction);
+    document.addEventListener('cut', blockAction);
+    document.addEventListener('paste', blockAction);
+    document.addEventListener('contextmenu', blockAction);
+
+    return () => {
+      document.removeEventListener('copy', blockAction);
+      document.removeEventListener('cut', blockAction);
+      document.removeEventListener('paste', blockAction);
+      document.removeEventListener('contextmenu', blockAction);
+    };
+  }, []);
+
   // ── Sauvegarde automatique avec debounce (1.5s) ─────────────────────────
   const saveAnswer = useCallback((updatedAnswers) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -151,9 +172,13 @@ export default function ExamRoom() {
         if (window.electronAPI) {
           await window.electronAPI.saveCode(JSON.stringify(updatedAnswers), parseInt(copieId));
         } else {
+          const token = sessionStorage.getItem('student_token');
           await fetch('http://localhost:3000/api/copies/sync', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
             body: JSON.stringify({ copieId: parseInt(copieId), answers: updatedAnswers })
           });
         }
@@ -186,6 +211,114 @@ export default function ExamRoom() {
     }
   }, [answers, saveAnswer]);
 
+  useEffect(() => {
+    if (!examData) return;
+    const currentType = answers[examData.questions[currentQ]?.id]?.type;
+    if (currentType === 'uml') {
+      setSidebarOpen(false);
+      setPdfOpen(false);
+    } else if (currentType) {
+      setSidebarOpen(true);
+      setPdfOpen(true);
+    }
+  }, [currentQ, answers, examData]);
+
+  // ── Anti-Triche & Ping ───────────────────────────────────────────────────
+  const alertsQueue = useRef([]);
+  const hasCheatedRef = useRef(false);
+  const handleSubmitRef = useRef(null);
+
+  useEffect(() => {
+    const studentInfo = JSON.parse(sessionStorage.getItem('student_info'));
+    const etudiantId = studentInfo?.id || 0;
+    const sessionData = JSON.parse(sessionStorage.getItem('exam_data'));
+    const sessionId = sessionData?.sessionId || 0;
+
+    const pushAlert = (type, description, isCritical = false) => {
+      alertsQueue.current.push({ type, description, criticite: isCritical ? 'Critique' : 'Avertissement' });
+      
+      if (isCritical && !hasCheatedRef.current) {
+        hasCheatedRef.current = true;
+        alert("🚨 AVERTISSEMENT STRICT 🚨\n\nVous avez enfreint les règles de l'examen (sortie de la page ou perte de focus).\n\nVotre examen va être soumis immédiatement et vous ne pourrez plus vous reconnecter.");
+        if (handleSubmitRef.current) handleSubmitRef.current();
+      }
+    };
+
+    if (window.electronAPI) {
+      window.electronAPI.invoke('enter-exam-mode');
+      
+      if (window.electronAPI.onExamCloseAttempt) {
+        window.electronAPI.onExamCloseAttempt(() => {
+          const exitConfirmed = window.confirm("ATTENTION : Si vous quittez maintenant, vous ne pourrez plus vous reconnecter et l'enseignant sera alerté. Voulez-vous vraiment quitter ?");
+          if (exitConfirmed) {
+            pushAlert('Sortie de l\'examen', "L'étudiant a quitté volontairement l'examen.", true);
+            if (handleSubmitRef.current) handleSubmitRef.current();
+            setTimeout(() => {
+              window.electronAPI.invoke('exit-exam-mode').then(() => {
+                window.close();
+              });
+            }, 1000);
+          } else {
+            pushAlert('Tentative de sortie', "L'étudiant a tenté de fermer l'application.", false);
+          }
+        });
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        pushAlert('Sortie de page', "L'étudiant a quitté l'onglet ou réduit le navigateur.", false);
+        alert("⚠️ ATTENTION : Vous avez quitté la page de l'examen. Ceci est enregistré et signalé à votre enseignant.");
+      }
+    };
+
+    const handleBlur = () => {
+      pushAlert('Perte de focus', "L'étudiant a cliqué en dehors de la fenêtre d'examen.", false);
+    };
+
+    const handleCopyPaste = (e) => {
+      e.preventDefault();
+      pushAlert('Copier/Coller', "Tentative de copier-coller bloquée.");
+      alert("⚠️ Le copier-coller est interdit pendant l'examen.");
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('copy', handleCopyPaste);
+    document.addEventListener('paste', handleCopyPaste);
+
+    const pingInterval = setInterval(async () => {
+      const alertsToSend = [...alertsQueue.current];
+      alertsQueue.current = [];
+
+      try {
+        if (window.electronAPI) {
+          await window.electronAPI.invoke('student-ping', parseInt(copieId), etudiantId, sessionId, alertsToSend);
+        } else {
+          const token = sessionStorage.getItem('student_token');
+          await fetch('http://localhost:3000/api/student/ping', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ copieId: parseInt(copieId), etudiantId, sessionId, alerts: alertsToSend })
+          });
+        }
+      } catch (e) {
+        alertsQueue.current = [...alertsToSend, ...alertsQueue.current];
+      }
+    }, 5000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('copy', handleCopyPaste);
+      document.removeEventListener('paste', handleCopyPaste);
+      clearInterval(pingInterval);
+    };
+  }, [copieId]);
+
   // ── Soumission ──────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current) return;
@@ -193,25 +326,38 @@ export default function ExamRoom() {
     setShowSubmitModal(false);
     try {
       if (window.electronAPI) {
-        await window.electronAPI.saveCode(JSON.stringify(answers), parseInt(copieId));
+        await window.electronAPI.invoke('save-code', JSON.stringify(answers), parseInt(copieId));
+        await window.electronAPI.invoke('submit-exam', parseInt(copieId));
       } else {
+        const token = sessionStorage.getItem('student_token');
+        const headers = { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        };
         await fetch('http://localhost:3000/api/copies/sync', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ copieId: parseInt(copieId), answers })
         });
+        await fetch('http://localhost:3000/api/copies/submit', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ copieId: parseInt(copieId) })
+        });
       }
-      await fetch('http://localhost:3000/api/copies/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ copieId: parseInt(copieId) })
-      });
     } catch (_) {
       // Offline ou erreur réseau : la copie a été sauvegardée localement
+    }
+    if (window.electronAPI) {
+      await window.electronAPI.invoke('exit-exam-mode');
     }
     sessionStorage.clear();
     navigate('/');
   }, [answers, copieId, navigate]);
+
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  }, [handleSubmit]);
 
   const handleTimeExpired = useCallback(() => {
     setTimeExpired(true);
@@ -287,7 +433,15 @@ export default function ExamRoom() {
 
       <div className="exam-body">
         {/* ── Sidebar Navigation ──────────────────────────────────────────── */}
-        <aside className="questions-sidebar" style={{ width: answers[question?.id]?.type === 'uml' ? '200px' : '260px', transition: 'width 0.3s ease' }}>
+        <aside className="questions-sidebar" style={{ 
+          width: sidebarOpen ? (answers[question?.id]?.type === 'uml' ? '200px' : '260px') : '0px', 
+          opacity: sidebarOpen ? 1 : 0,
+          padding: sidebarOpen ? '20px 16px' : '20px 0px',
+          overflow: 'hidden',
+          transition: 'all 0.3s ease',
+          flexShrink: 0,
+          borderRight: sidebarOpen ? '1px solid var(--border)' : 'none'
+        }}>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             RÉPONSES
           </div>
@@ -381,9 +535,18 @@ export default function ExamRoom() {
           
           {/* ─ Panneau Gauche : Sujet Global & PDF ─ */}
           {(examData.sujetPdfBase64 || examData.instructions || examData.questions.some(q => q.enonce && q.enonce !== 'Nouvelle réponse libre')) && (
-            <div style={{ flex: answers[question?.id]?.type === 'uml' ? '0 0 30%' : '0 0 45%', transition: 'flex 0.3s ease', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+            <div style={{ 
+              flex: pdfOpen ? (answers[question?.id]?.type === 'uml' ? '0 0 30%' : '0 0 45%') : '0 0 0%', 
+              opacity: pdfOpen ? 1 : 0,
+              overflow: 'hidden',
+              transition: 'all 0.3s ease', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              borderRight: pdfOpen ? '1px solid var(--border)' : 'none', 
+              background: 'var(--bg-card)' 
+            }}>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minWidth: pdfOpen ? '300px' : '0px' }}>
               {examData.instructions && (
                 <div style={{ padding: 20, fontSize: '0.95rem', lineHeight: 1.6, color: 'var(--text-secondary)', borderBottom: examData.sujetPdfBase64 ? '1px solid var(--border)' : 'none' }}>
                   {examData.instructions.split('\n').map((line, i) => <p key={i} style={{ margin: '0 0 8px 0' }}>{line}</p>)}
@@ -438,19 +601,31 @@ export default function ExamRoom() {
 
               {/* Zone de réponse */}
               <div className="answer-area" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div className="answer-header" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '1rem', fontWeight: 600 }}>
-                    {answers[question?.id]?.type ? (
-                      <>{TYPE_CONFIG[answers[question.id].type]?.icon} {t('examRoomWorkspace')}</>
-                    ) : (
-                      <>🛠 Choisissez votre outil de réponse</>
+                <div className="answer-header" style={{ padding: '8px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', borderBottom: '1px solid var(--border)' }}>
+                  
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ padding: '4px 8px', fontSize: '0.8rem', color: sidebarOpen ? 'var(--text-muted)' : 'var(--accent)' }} title="Afficher/Masquer la liste des réponses">
+                      {sidebarOpen ? '◀ Réponses' : '▶ Réponses'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setPdfOpen(!pdfOpen)} style={{ padding: '4px 8px', fontSize: '0.8rem', color: pdfOpen ? 'var(--text-muted)' : 'var(--accent)' }} title="Afficher/Masquer l'épreuve">
+                      {pdfOpen ? '◀ Sujet' : '▶ Sujet'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <span style={{ fontSize: '1rem', fontWeight: 600 }}>
+                      {answers[question?.id]?.type ? (
+                        <>{TYPE_CONFIG[answers[question.id].type]?.icon} {t('examRoomWorkspace')}</>
+                      ) : (
+                        <>🛠 Choisissez votre outil de réponse</>
+                      )}
+                    </span>
+                    {answers[question?.id]?.type && (
+                       <button className="btn btn-ghost btn-sm" onClick={() => handleTypeChange(null)} style={{ fontSize: '0.8rem', padding: '4px 8px', color: 'var(--text-muted)' }}>
+                         🔄 Changer d'outil
+                       </button>
                     )}
-                  </span>
-                  {answers[question?.id]?.type && (
-                     <button className="btn btn-ghost btn-sm" onClick={() => handleTypeChange(null)} style={{ fontSize: '0.8rem', padding: '4px 8px', color: 'var(--text-muted)' }}>
-                       🔄 Changer d'outil
-                     </button>
-                  )}
+                  </div>
                 </div>
 
                 {!answers[question?.id]?.type ? (
@@ -516,8 +691,39 @@ export default function ExamRoom() {
                             readOnly={false}
                           />
                         </div>
-                        <div style={{ padding: '8px 16px', background: 'rgba(139,92,246,0.05)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.15)', fontSize: '0.85rem', color: 'rgba(196,181,253,0.7)', flexShrink: 0 }}>
-                          📐 Éditeur UML interactif — Ajoutez des classes, des attributs, des méthodes et reliez-les. Votre diagramme est sauvegardé automatiquement.
+                      </div>
+                    )}
+
+                    {/* QCM */}
+                    {answers[question.id].type === 'qcm' && (
+                      <div className="qcm-answer-area" style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {(question.options || []).map(opt => {
+                            let selected = [];
+                            try { selected = JSON.parse(answers[question.id].content || '[]'); } catch(e){}
+                            if (!Array.isArray(selected)) selected = [];
+                            const isChecked = selected.includes(opt.id);
+                            
+                            return (
+                              <label key={opt.id} style={{ 
+                                display: 'flex', alignItems: 'center', gap: 12, padding: '16px', 
+                                background: isChecked ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.03)', 
+                                border: `1px solid ${isChecked ? 'var(--accent)' : 'var(--border)'}`, 
+                                borderRadius: 12, cursor: 'pointer', transition: 'all 0.2s'
+                              }}>
+                                <input type="checkbox" checked={isChecked} 
+                                  style={{ width: 20, height: 20, accentColor: 'var(--accent)' }}
+                                  onChange={e => {
+                                    let newSelected = [...selected];
+                                    if (e.target.checked) newSelected.push(opt.id);
+                                    else newSelected = newSelected.filter(id => id !== opt.id);
+                                    handleAnswerChange(JSON.stringify(newSelected));
+                                  }}
+                                />
+                                <span style={{ fontSize: '1rem', color: '#fff' }}>{opt.text}</span>
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -553,7 +759,7 @@ export default function ExamRoom() {
                         cursor: 'pointer', 
                         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                         background: idx === currentQ ? 'var(--accent)'
-                          : (() => { const a = answers[examData.questions[idx].id]; return (a && a.type && typeof a.content === 'string' && a.content.trim() !== '') ? 'var(--success)' : 'var(--border)'; })()
+                          : (() => { const a = answers[examData.questions[idx].id]; return (a && a.type && typeof a.content === 'string' && a.content.trim() !== '' && a.content !== '[]') ? 'var(--success)' : 'var(--border)'; })()
                       }}
                       title={`Question ${idx + 1}`}
                     />

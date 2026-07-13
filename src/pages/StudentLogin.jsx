@@ -172,7 +172,13 @@ export default function StudentLogin() {
     setLoading(true);
     setError('');
 
-    const storeSession = (user) => {
+    const storeSession = (user, token = null) => {
+      if (token) {
+        sessionStorage.setItem('student_token', token);
+        if (window.electronAPI) {
+          window.electronAPI.invoke('set-auth-token', token);
+        }
+      }
       sessionStorage.setItem('student_matricule', user.matricule);
       sessionStorage.setItem('student_name', `${user.prenom} ${user.nom}`);
       sessionStorage.setItem('session_code', examCode.trim().toUpperCase());
@@ -221,7 +227,7 @@ export default function StudentLogin() {
         const data = await response.json();
         setLoading(false);
         if (data.success && data.user) {
-          storeSession(data.user);
+          storeSession(data.user, data.token);
         } else {
           setError(data.error || t('authError'));
         }
@@ -256,13 +262,15 @@ export default function StudentLogin() {
           <h2 className="auth-title">{t('studentTitle')}</h2>
           <p className="auth-subtitle">{t('studentDesc')}</p>
 
-          <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form autoComplete="off" onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="form-group">
               <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--student-color)' }}>👤</span> {t('matriculeLabel')}
               </label>
               <input
                 id="matricule"
+                name="matricule_student_off"
+                autoComplete="off"
                 className="premium-input"
                 type="text"
                 placeholder="ex: ETU001"
@@ -278,6 +286,8 @@ export default function StudentLogin() {
               </label>
               <input
                 id="exam-code"
+                name="session_code_off"
+                autoComplete="off"
                 className="premium-input"
                 type="text"
                 placeholder="ex: X4K9"
@@ -298,6 +308,8 @@ export default function StudentLogin() {
               </label>
               <input
                 id="personal-code"
+                name="personal_code_off"
+                autoComplete="new-password"
                 className="premium-input"
                 type="password"
                 placeholder="••••••••"
