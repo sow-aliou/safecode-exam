@@ -408,7 +408,7 @@ app.post('/api/sessions/:id/students', authenticateToken, async (req, res) => {
               </div>
             `;
             const mailOptions = {
-              from: '"Plateforme SAFECODE-EXAM" <noreply@safecode-exam.com>',
+              from: `"Plateforme SAFECODE-EXAM" <${process.env.SMTP_USER || 'noreply@safecode-exam.com'}>`,
               to: student.email,
               subject: `🚨 Vos Accès pour l'examen : ${examenTitre}`,
               html: emailHtml
