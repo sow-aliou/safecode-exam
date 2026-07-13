@@ -1,5 +1,5 @@
 # Étape 1 : Construction du Frontend (React/Vite)
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copier les fichiers de dépendances du frontend
@@ -12,7 +12,7 @@ COPY . .
 RUN npm run build
 
 # Étape 2 : Préparation du Backend et de l'image finale
-FROM node:18-alpine
+FROM node:22-alpine
 WORKDIR /app
 
 # Créer le répertoire pour la base de données (Volume)
