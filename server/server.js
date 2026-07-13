@@ -48,6 +48,23 @@ if (process.env.SMTP_USER && process.env.SMTP_PASS) {
 
 // ================= JWT MIDDLEWARE =================
 
+app.get('/api/test-email', async (req, res) => {
+  if (!transporter) {
+    return res.json({ status: "Erreur", message: "Transporter non configuré. Avez-vous défini SMTP_USER ?" });
+  }
+  try {
+    const info = await transporter.sendMail({
+      from: `"${process.env.SMTP_USER || 'Test'}" <${process.env.SMTP_USER || 'test@example.com'}>`,
+      to: process.env.SMTP_USER || 'test@example.com',
+      subject: "Test Diagnostic SMTP",
+      text: "Ceci est un test de diagnostic pour vérifier que l'envoi d'emails fonctionne sur Render."
+    });
+    res.json({ status: "Succès", message: "L'email a été envoyé avec succès !", info });
+  } catch (error) {
+    res.json({ status: "Échec", message: error.message, stack: error.stack });
+  }
+});
+
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
