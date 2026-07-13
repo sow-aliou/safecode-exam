@@ -413,11 +413,14 @@ app.post('/api/sessions/:id/students', authenticateToken, async (req, res) => {
               subject: `🚨 Vos Accès pour l'examen : ${examenTitre}`,
               html: emailHtml
             };
-            const info = await transporter.sendMail(mailOptions);
-            console.log(`[EMAIL ENVOYÉ] à ${student.email}`);
+            
+            // Fire and forget pour ne pas ralentir le serveur
+            transporter.sendMail(mailOptions)
+              .then(() => console.log(`[EMAIL ENVOYÉ] à ${student.email}`))
+              .catch(mailErr => console.error(`Erreur d'envoi d'email à ${student.email}:`, mailErr.message));
+            
           } catch (mailErr) {
             console.error(`Erreur d'envoi d'email à ${student.email}:`, mailErr.message);
-            errors.push(`Erreur email ${student.matricule}: ${mailErr.message}`);
           }
         }
         completed++;
