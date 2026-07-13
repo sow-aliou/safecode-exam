@@ -316,140 +316,131 @@ app.post('/api/sessions/:id/pdf', authenticateToken, (req, res) => {
 app.post('/api/sessions/:id/students', authenticateToken, async (req, res) => {
   const sessionId = req.params.id;
   const teacherId = req.user.id;
-  const { students } = req.body; // Array de { matricule, nom, prenom, email, codeSecret }
+  const { students } = req.body;
 
   if (!students || !Array.isArray(students)) {
     return res.status(400).json({ error: "Liste d'étudiants invalide." });
   }
 
-  // Récupérer les infos du professeur et de l'examen pour un email personnalisé SaaS
-  db.get(
-    `SELECT u.nom as profNom, u.prenom as profPrenom, e.titre as examenTitre, s.codeAccesSecret, s.dateHeureDebut
-     FROM Utilisateur u, SessionExamen s 
-     JOIN Examen e ON s.examen_id = e.id 
-     WHERE u.id = ? AND s.id = ?`,
-    [teacherId, sessionId],
-    async (err, contextInfo) => {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const profNom = contextInfo ? contextInfo.profNom : 'votre enseignant';
-      const profPrenom = contextInfo ? contextInfo.profPrenom : '';
-      const examenTitre = contextInfo ? contextInfo.examenTitre : 'Épreuve Sécurisée';
-      const sessionCode = contextInfo ? contextInfo.codeAccesSecret : sessionId;
-      
-      let dateExamenFormatee = 'Date non spécifiée';
-      if (contextInfo && contextInfo.dateHeureDebut) {
-        const d = new Date(contextInfo.dateHeureDebut);
-        dateExamenFormatee = d.toLocaleString('fr-FR', { 
-          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', 
-          hour: '2-digit', minute: '2-digit' 
-        });
-      }
-
-      try {
-        const studentsWithHashedPasswords = await Promise.all(
-          students.map(async (student) => {
-            const hashedPassword = await bcrypt.hash(student.codeSecret, 10);
-            return { ...student, hashedPassword };
-        })
-      );
-
-      db.serialize(() => {
-        let completed = 0;
-        let errors = [];
-
-        studentsWithHashedPasswords.forEach((student) => {
-          // 1. Insérer ou mettre à jour l'étudiant
-          db.run(
-            `INSERT INTO Utilisateur (matricule, nom, prenom, email, motDePasse, typeUtilisateur) 
-             VALUES (?, ?, ?, ?, ?, 'Etudiant')
-             ON CONFLICT(matricule) DO UPDATE SET nom=excluded.nom, prenom=excluded.prenom, email=excluded.email, motDePasse=excluded.motDePasse`,
-            [student.matricule, student.nom, student.prenom, student.email, student.hashedPassword],
-          function(err) {
-            if (err) {
-              errors.push(`Erreur insertion ${student.matricule}: ${err.message}`);
-              return;
-            }
-
-            db.get(`SELECT id FROM Utilisateur WHERE matricule = ?`, [student.matricule], (errGet, row) => {
-              if (errGet || !row) return;
-
-              const studentId = row.id;
-
-              // 2. Associer l'étudiant à la session (création de copie)
-              db.run(
-                `INSERT INTO Copie (etudiant_id, session_id, contenuCode, fluxUML) 
-                 VALUES (?, ?, '', '')
-                 ON CONFLICT(etudiant_id, session_id) DO NOTHING`,
-                [studentId, sessionId],
-                async function(errCopie) {
-                  // Envoi réel de l'email via Nodemailer
-                  try {
-                    const emailHtml = `
-                      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9fafb;">
-                        <div style="text-align: center; margin-bottom: 20px;">
-                          <h2 style="color: #10b981; margin: 0;">SafeCode Exam</h2>
-                        </div>
-                        <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                          <p style="font-size: 16px; color: #374151;">Bonjour <strong>${student.prenom}</strong>,</p>
-                          <p style="font-size: 16px; color: #374151; line-height: 1.5;">
-                            Le professeur <strong>${profPrenom} ${profNom}</strong> vous a convié(e) à participer à l'examen <strong>"${examenTitre}"</strong> sur la plateforme SafeCode.
-                          </p>
-                          
-                          <div style="background-color: #eef2ff; padding: 12px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #6366f1;">
-                            <p style="margin: 0; font-size: 15px; color: #4338ca;"><strong>📅 Date de l'épreuve :</strong> ${dateExamenFormatee}</p>
-                          </div>
-
-                          <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
-                            <p style="margin: 0 0 10px 0; font-size: 15px; color: #4b5563;">Voici vos accès personnels et confidentiels pour vous connecter à l'épreuve :</p>
-                            <ul style="list-style-type: none; padding: 0; margin: 0;">
-                              <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Code de session :</span> <strong style="font-size: 18px; color: #111827; letter-spacing: 1px;">${sessionCode}</strong></li>
-                              <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Matricule :</span> <strong style="font-size: 16px; color: #111827;">${student.matricule}</strong></li>
-                              <li><span style="color: #6b7280;">Code Secret :</span> <strong style="font-size: 18px; color: #10b981; letter-spacing: 1px;">${student.codeSecret}</strong></li>
-                            </ul>
-                          </div>
-                          <p style="font-size: 15px; color: #4b5563; line-height: 1.5;">
-                            Rendez-vous sur la plateforme à l'heure prévue pour l'épreuve.<br>
-                            Veuillez ne pas partager ces identifiants, ils sont uniques et liés à votre copie.
-                          </p>
-                          <p style="font-size: 16px; color: #374151; font-weight: bold; margin-top: 30px;">Bon courage et excellente journée !</p>
-                        </div>
-                        <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #9ca3af;">
-                          <p>Cet email a été envoyé automatiquement par la plateforme SafeCode-Exam. Merci de ne pas y répondre.</p>
-                        </div>
-                      </div>
-                    `;
-
-                    const mailOptions = {
-                      from: '"Plateforme SAFECODE-EXAM" <noreply@safecode-exam.com>',
-                      to: student.email,
-                      subject: `🚨 Vos Accès pour l'examen : ${examenTitre}`,
-                      text: `Bonjour ${student.prenom},\n\nLe professeur ${profPrenom} ${profNom} vous a convié(e) à participer à l'examen "${examenTitre}" sur la plateforme SafeCode.\nDate : ${dateExamenFormatee}\n\nVoici vos accès personnels et confidentiels :\n\n- Code de session : ${sessionCode}\n- Matricule : ${student.matricule}\n- Code Secret : ${student.codeSecret}\n\nBon courage !`,
-                      html: emailHtml
-                    };
-                    const info = await transporter.sendMail(mailOptions);
-                    console.log(`[EMAIL ENVOYÉ] à ${student.email}`);
-                    console.log(`Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
-                  } catch (mailErr) {
-                    console.error(`Erreur d'envoi d'email à ${student.email}:`, mailErr.message);
-                    errors.push(`Erreur email ${student.matricule}: ${mailErr.message}`);
-                  }
-                  
-                  completed++;
-                  if (completed === students.length) {
-                    res.json({ success: true, count: completed, errors });
-                  }
-                }
-              );
-            });
-          }
-        );
-      });
+  try {
+    const contextInfoRes = await db.execute({
+      sql: `SELECT u.nom as profNom, u.prenom as profPrenom, e.titre as examenTitre, s.codeAccesSecret, s.dateHeureDebut
+             FROM Utilisateur u, SessionExamen s 
+             JOIN Examen e ON s.examen_id = e.id 
+             WHERE u.id = ? AND s.id = ?`,
+      args: [teacherId, sessionId]
     });
+    
+    const contextInfo = contextInfoRes.rows.length > 0 ? contextInfoRes.rows[0] : null;
+    const profNom = contextInfo ? contextInfo.profNom : 'votre enseignant';
+    const profPrenom = contextInfo ? contextInfo.profPrenom : '';
+    const examenTitre = contextInfo ? contextInfo.examenTitre : 'Épreuve Sécurisée';
+    const sessionCode = contextInfo ? contextInfo.codeAccesSecret : sessionId;
+    
+    let dateExamenFormatee = 'Date non spécifiée';
+    if (contextInfo && contextInfo.dateHeureDebut) {
+      const d = new Date(contextInfo.dateHeureDebut);
+      dateExamenFormatee = d.toLocaleString('fr-FR', { 
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', 
+        hour: '2-digit', minute: '2-digit' 
+      });
+    }
+
+    let completed = 0;
+    let errors = [];
+
+    for (const student of students) {
+      try {
+        const hashedPassword = await bcrypt.hash(student.codeSecret, 10);
+        
+        await db.execute({
+          sql: `INSERT INTO Utilisateur (matricule, nom, prenom, email, motDePasse, typeUtilisateur) 
+                VALUES (?, ?, ?, ?, ?, 'Etudiant')
+                ON CONFLICT(matricule) DO UPDATE SET nom=excluded.nom, prenom=excluded.prenom, email=excluded.email, motDePasse=excluded.motDePasse`,
+          args: [student.matricule, student.nom, student.prenom, student.email, hashedPassword]
+        });
+
+        const userRes = await db.execute({
+          sql: `SELECT id FROM Utilisateur WHERE matricule = ?`,
+          args: [student.matricule]
+        });
+        
+        if (userRes.rows.length === 0) {
+          throw new Error("Utilisateur non trouvé après insertion");
+        }
+        
+        const studentId = userRes.rows[0].id;
+
+        await db.execute({
+          sql: `INSERT INTO Copie (etudiant_id, session_id, contenuCode, fluxUML) 
+                VALUES (?, ?, '', '')
+                ON CONFLICT(etudiant_id, session_id) DO NOTHING`,
+          args: [studentId, sessionId]
+        });
+
+        // Envoi email optionnel
+        if (typeof transporter !== 'undefined' && transporter) {
+          try {
+            const emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9fafb;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                  <h2 style="color: #10b981; margin: 0;">SafeCode Exam</h2>
+                </div>
+                <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                  <p style="font-size: 16px; color: #374151;">Bonjour <strong>${student.prenom}</strong>,</p>
+                  <p style="font-size: 16px; color: #374151; line-height: 1.5;">
+                    Le professeur <strong>${profPrenom} ${profNom}</strong> vous a convié(e) à participer à l'examen <strong>"${examenTitre}"</strong> sur la plateforme SafeCode.
+                  </p>
+                  
+                  <div style="background-color: #eef2ff; padding: 12px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #6366f1;">
+                    <p style="margin: 0; font-size: 15px; color: #4338ca;"><strong>📅 Date de l'épreuve :</strong> ${dateExamenFormatee}</p>
+                  </div>
+
+                  <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10b981;">
+                    <p style="margin: 0 0 10px 0; font-size: 15px; color: #4b5563;">Voici vos accès personnels et confidentiels pour vous connecter à l'épreuve :</p>
+                    <ul style="list-style-type: none; padding: 0; margin: 0;">
+                      <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Code de session :</span> <strong style="font-size: 18px; color: #111827; letter-spacing: 1px;">${sessionCode}</strong></li>
+                      <li style="margin-bottom: 8px;"><span style="color: #6b7280;">Matricule :</span> <strong style="font-size: 16px; color: #111827;">${student.matricule}</strong></li>
+                      <li><span style="color: #6b7280;">Code Secret :</span> <strong style="font-size: 18px; color: #10b981; letter-spacing: 1px;">${student.codeSecret}</strong></li>
+                    </ul>
+                  </div>
+                  <p style="font-size: 15px; color: #4b5563; line-height: 1.5;">
+                    Rendez-vous sur la plateforme à l'heure prévue pour l'épreuve.<br>
+                    Veuillez ne pas partager ces identifiants, ils sont uniques et liés à votre copie.
+                  </p>
+                  <p style="font-size: 16px; color: #374151; font-weight: bold; margin-top: 30px;">Bon courage et excellente journée !</p>
+                </div>
+                <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #9ca3af;">
+                  <p>Cet email a été envoyé automatiquement par la plateforme SafeCode-Exam. Merci de ne pas y répondre.</p>
+                </div>
+              </div>
+            `;
+            const mailOptions = {
+              from: '"Plateforme SAFECODE-EXAM" <noreply@safecode-exam.com>',
+              to: student.email,
+              subject: `🚨 Vos Accès pour l'examen : ${examenTitre}`,
+              html: emailHtml
+            };
+            const info = await transporter.sendMail(mailOptions);
+            console.log(`[EMAIL ENVOYÉ] à ${student.email}`);
+          } catch (mailErr) {
+            console.error(`Erreur d'envoi d'email à ${student.email}:`, mailErr.message);
+            errors.push(`Erreur email ${student.matricule}: ${mailErr.message}`);
+          }
+        }
+        completed++;
+      } catch (err) {
+        console.error(err);
+        errors.push(`Erreur pour ${student.matricule}: ${err.message}`);
+      }
+    }
+
+    res.json({ success: true, count: completed, errors });
+
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: error.message });
   }
-  }); // Close db.get callback
 });
 
 // Récupérer les étudiants d'une session
