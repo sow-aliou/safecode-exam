@@ -118,11 +118,16 @@ async function initServerDb() {
 // Lancer l'init
 initServerDb();
 
+const sanitizeArgs = (args) => (args || []).map(a => a === undefined ? null : a);
+
 const dbWrapper = {
-  execute: async (sql) => await db.execute(sql),
+  execute: async (query) => {
+    if (typeof query === 'string') return await db.execute(query);
+    return await db.execute({ sql: query.sql, args: sanitizeArgs(query.args) });
+  },
   run: (sql, params, cb) => {
     if (typeof params === 'function') { cb = params; params = []; }
-    db.execute({ sql, args: params || [] })
+    db.execute({ sql, args: sanitizeArgs(params) })
       .then(res => {
         const lastID = res.lastInsertRowid ? Number(res.lastInsertRowid) : undefined;
         if (cb) cb.call({ lastID }, null);
@@ -133,7 +138,7 @@ const dbWrapper = {
   },
   get: (sql, params, cb) => {
     if (typeof params === 'function') { cb = params; params = []; }
-    db.execute({ sql, args: params || [] })
+    db.execute({ sql, args: sanitizeArgs(params) })
       .then(res => {
         if (cb) cb(null, res.rows.length > 0 ? res.rows[0] : undefined);
       })
@@ -143,7 +148,7 @@ const dbWrapper = {
   },
   all: (sql, params, cb) => {
     if (typeof params === 'function') { cb = params; params = []; }
-    db.execute({ sql, args: params || [] })
+    db.execute({ sql, args: sanitizeArgs(params) })
       .then(res => {
         if (cb) cb(null, res.rows);
       })
