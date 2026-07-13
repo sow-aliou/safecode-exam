@@ -36,22 +36,14 @@ if (process.env.SMTP_USER && process.env.SMTP_PASS) {
   });
   console.log("Nodemailer configuré avec le serveur SMTP personnalisé.");
 } else {
-  nodemailer.createTestAccount((err, account) => {
-    if (err) {
-      console.error('Failed to create a testing account. ' + err.message);
-      return;
+  // Mode sans email pour Render (simulation instantanée sans bloquer)
+  transporter = {
+    sendMail: async (options) => {
+      console.log(`[SIMULATION EMAIL] Email "envoyé" (simulé) à: ${options.to}`);
+      return { messageId: 'simulated-' + Date.now() };
     }
-    transporter = nodemailer.createTransport({
-      host: account.smtp.host,
-      port: account.smtp.port,
-      secure: account.smtp.secure,
-      auth: {
-        user: account.user,
-        pass: account.pass
-      }
-    });
-    console.log("Nodemailer configuré avec le mode Simulation (Ethereal).");
-  });
+  };
+  console.log("Nodemailer: SMTP non configuré. Les emails seront simulés dans la console (ultra-rapide).");
 }
 
 // ================= JWT MIDDLEWARE =================
