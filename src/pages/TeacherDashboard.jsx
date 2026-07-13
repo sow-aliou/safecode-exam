@@ -67,7 +67,7 @@ export default function TeacherDashboard() {
         const response = await window.electronAPI.getSessions(tId);
         if (response.success) sessionsList = response.sessions;
       } else {
-        const url = tId ? `http://localhost:3000/api/sessions?teacherId=${tId}` : 'http://localhost:3000/api/sessions';
+        const url = tId ? `/api/sessions?teacherId=${tId}` : '/api/sessions';
         const token = sessionStorage.getItem('teacher_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
         const response = await fetch(url, { headers });
@@ -114,7 +114,7 @@ export default function TeacherDashboard() {
       } else {
         const token = sessionStorage.getItem('teacher_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/results`, { headers });
+        const res = await fetch(`/api/sessions/${sessionId}/results`, { headers });
         const data = await res.json();
         if (data.success) setSessionResults(data.results);
       }
@@ -214,7 +214,7 @@ export default function TeacherDashboard() {
     } else {
       try {
         const token = sessionStorage.getItem('teacher_token');
-        const response = await fetch('http://localhost:3000/api/sessions', {
+        const response = await fetch('/api/sessions', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -304,7 +304,7 @@ export default function TeacherDashboard() {
       try {
         const token = sessionStorage.getItem('teacher_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch(`http://localhost:3000/api/sessions/${session.id}/students`, { headers });
+        const response = await fetch(`/api/sessions/${session.id}/students`, { headers });
         const data = await response.json();
         if (data.success && data.students.length > 0) {
           setImportedStudents(data.students.map(s => ({ ...s, statusEmail: 'Envoyé' })));
@@ -340,7 +340,7 @@ export default function TeacherDashboard() {
         await window.electronAPI.importStudents(selectedSession.id, studentsWithCode);
       } else if (selectedSession) {
         const token = sessionStorage.getItem('teacher_token');
-        const response = await fetch(`http://localhost:3000/api/sessions/${selectedSession.id}/students`, {
+        const response = await fetch(`/api/sessions/${selectedSession.id}/students`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -431,7 +431,7 @@ export default function TeacherDashboard() {
         }
       } else {
         const token = sessionStorage.getItem('teacher_token');
-        const res = await fetch(`http://localhost:3000/api/copies/${activeCopie.copieId}/grade`, {
+        const res = await fetch(`/api/copies/${activeCopie.copieId}/grade`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',

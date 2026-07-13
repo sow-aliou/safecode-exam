@@ -48,7 +48,7 @@ export default function CreateExam() {
         }
         const token = sessionStorage.getItem('teacher_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`, { headers });
+        const res = await fetch(`/api/sessions/${sessionId}/exam`, { headers });
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.exam) {
@@ -141,7 +141,7 @@ export default function CreateExam() {
         await window.electronAPI.updateSessionExam(sessionId, examData);
       } else if (sessionId) {
         const token = sessionStorage.getItem('teacher_token');
-        const response = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`, {
+        const response = await fetch(`/api/sessions/${sessionId}/exam`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',

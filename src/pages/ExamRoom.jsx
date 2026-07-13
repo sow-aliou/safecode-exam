@@ -173,7 +173,7 @@ export default function ExamRoom() {
           await window.electronAPI.saveCode(JSON.stringify(updatedAnswers), parseInt(copieId));
         } else {
           const token = sessionStorage.getItem('student_token');
-          await fetch('http://localhost:3000/api/copies/sync', {
+          await fetch('/api/copies/sync', {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
@@ -296,7 +296,7 @@ export default function ExamRoom() {
           await window.electronAPI.invoke('student-ping', parseInt(copieId), etudiantId, sessionId, alertsToSend);
         } else {
           const token = sessionStorage.getItem('student_token');
-          await fetch('http://localhost:3000/api/student/ping', {
+          await fetch('/api/student/ping', {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
@@ -334,12 +334,12 @@ export default function ExamRoom() {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         };
-        await fetch('http://localhost:3000/api/copies/sync', {
+        await fetch('/api/copies/sync', {
           method: 'POST',
           headers,
           body: JSON.stringify({ copieId: parseInt(copieId), answers })
         });
-        await fetch('http://localhost:3000/api/copies/submit', {
+        await fetch('/api/copies/submit', {
           method: 'POST',
           headers,
           body: JSON.stringify({ copieId: parseInt(copieId) })

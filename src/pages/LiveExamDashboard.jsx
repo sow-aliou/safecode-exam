@@ -25,7 +25,7 @@ const LiveExamDashboard = () => {
       } else {
         const token = getToken();
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const response = await fetch(`http://localhost:3000/api/sessions/${sessionId}/live`, { headers });
+        const response = await fetch(`/api/sessions/${sessionId}/live`, { headers });
         data = await response.json();
       }
 
@@ -47,7 +47,7 @@ const LiveExamDashboard = () => {
 
   const fetchExamInfo = async () => {
     try {
-      const examRes = await fetch(`http://localhost:3000/api/sessions/${sessionId}/exam`, {
+      const examRes = await fetch(`/api/sessions/${sessionId}/exam`, {
         headers: { 'Authorization': `Bearer ${getToken()}` }
       });
       const examData = await examRes.json();
@@ -108,7 +108,7 @@ const LiveExamDashboard = () => {
           setError(res.error || "Erreur lors de l'ajout de temps.");
         }
       } else {
-        const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/add-time`, {
+        const res = await fetch(`/api/sessions/${sessionId}/add-time`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
