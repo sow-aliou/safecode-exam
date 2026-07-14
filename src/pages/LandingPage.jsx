@@ -117,126 +117,56 @@ const landingStyles = `
     line-height: 1.6;
     margin-bottom: 64px;
   }
-  .premium-cards-container {
+  .landing-header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 80px;
+    padding: 0 40px;
     display: flex;
-    gap: 24px;
-    justify-content: center;
-    flex-wrap: wrap;
-    width: 100%;
-    max-width: 900px;
-  }
-  .premium-card {
-    flex: 1;
-    min-width: 320px;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+    background: rgba(5, 8, 7, 0.7);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-radius: 32px;
-    padding: 40px;
-    text-align: left;
-    cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   }
-  .premium-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    border-radius: inherit;
-    padding: 1.5px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    transition: all 0.4s ease;
-  }
-  .premium-card:hover {
-    transform: translateY(-8px) scale(1.02);
-    background: rgba(255, 255, 255, 0.04);
-  }
-  .premium-card.teacher:hover::before {
-    background: linear-gradient(135deg, var(--teacher-light), transparent);
-  }
-  .premium-card.student:hover::before {
-    background: linear-gradient(135deg, var(--student-light), transparent);
-  }
-  .premium-card.teacher:hover {
-    box-shadow: 0 20px 50px rgba(245, 158, 11, 0.12), 0 0 0 1px rgba(245, 158, 11, 0.2);
-  }
-  .premium-card.student:hover {
-    box-shadow: 0 20px 50px rgba(20, 184, 166, 0.12), 0 0 0 1px rgba(20, 184, 166, 0.2);
-  }
-  .premium-card-icon-wrapper {
-    width: 64px;
-    height: 64px;
-    border-radius: 20px;
+  .header-logo {
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-size: 2.2rem;
-    margin-bottom: 24px;
-    position: relative;
-    box-shadow: inset 0 2px 0 rgba(255,255,255,0.1);
-  }
-  .premium-card.teacher .premium-card-icon-wrapper {
-    background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.02));
-    border: 1px solid rgba(245,158,11,0.25);
-    color: var(--teacher-light);
-  }
-  .premium-card.student .premium-card-icon-wrapper {
-    background: linear-gradient(135deg, rgba(20,184,166,0.15), rgba(20,184,166,0.02));
-    border: 1px solid rgba(20,184,166,0.25);
-    color: var(--student-light);
-  }
-  .premium-card h2 {
-    font-size: 1.8rem;
-    font-weight: 700;
+    gap: 12px;
+    font-size: 1.5rem;
+    font-weight: 800;
     color: #fff;
-    margin-bottom: 12px;
-    letter-spacing: -0.02em;
+    text-decoration: none;
   }
-  .premium-card p {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    margin-bottom: 32px;
+  .header-logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    box-shadow: 0 0 0 1px rgba(16,185,129,0.3), 0 8px 16px rgba(16,185,129,0.2);
   }
-  .premium-card-btn {
-    display: inline-flex;
+  .header-actions {
+    display: flex;
     align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 1rem;
-    transition: all 0.3s ease;
+    gap: 20px;
   }
-  .premium-card.teacher .premium-card-btn { color: var(--teacher-light); }
-  .premium-card.student .premium-card-btn { color: var(--student-light); }
-  .premium-card:hover .premium-card-btn { gap: 14px; }
   
   .lang-switcher {
-    position: absolute;
-    top: 32px;
-    right: 32px;
     display: flex;
     gap: 4px;
     background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 14px;
     padding: 6px;
-    z-index: 50;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   }
   .lang-btn {
     background: transparent;
     color: var(--text-secondary);
     border: none;
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 10px;
     cursor: pointer;
     font-size: 0.85rem;
@@ -251,6 +181,54 @@ const landingStyles = `
   .lang-btn:hover:not(.active) {
     background: rgba(255,255,255,0.05);
     color: #fff;
+  }
+  
+  .login-button {
+    background: #fff;
+    color: #050807;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .login-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(255,255,255,0.2);
+  }
+  
+  .landing-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding-top: 80px;
+  }
+  .hero-cta {
+    margin-top: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    color: white;
+    border: none;
+    padding: 16px 40px;
+    border-radius: 20px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 0 0 1px rgba(16,185,129,0.3), 0 12px 30px var(--accent-glow);
+    transition: all 0.3s ease;
+    animation: fadeUp 0.6s ease forwards;
+    animation-delay: 0.5s;
+    opacity: 0;
+  }
+  .hero-cta:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 0 0 1px rgba(16,185,129,0.5), 0 20px 40px var(--accent-glow);
   }
 `;
 
@@ -267,23 +245,35 @@ export default function LandingPage() {
         <div className="landing-bg-orb2"></div>
         <div className="landing-bg-glow"></div>
 
-        {/* Sélecteur de langue */}
-        <div className="lang-switcher animate-fade-up">
-          <button
-            className={`lang-btn ${lang === "fr" ? "active" : ""}`}
-            onClick={() => setLanguage("fr")}
-          >
-            🇫🇷 FR
-          </button>
-          <button
-            className={`lang-btn ${lang === "en" ? "active" : ""}`}
-            onClick={() => setLanguage("en")}
-          >
-            🇬🇧 EN
-          </button>
-        </div>
+        <header className="landing-header">
+          <div className="header-logo">
+            <div className="header-logo-icon">🛡️</div>
+            SafeCode-Exam
+          </div>
+          <div className="header-actions">
+            {/* Sélecteur de langue */}
+            <div className="lang-switcher">
+              <button
+                className={`lang-btn ${lang === "fr" ? "active" : ""}`}
+                onClick={() => setLanguage("fr")}
+              >
+                FR
+              </button>
+              <button
+                className={`lang-btn ${lang === "en" ? "active" : ""}`}
+                onClick={() => setLanguage("en")}
+              >
+                EN
+              </button>
+            </div>
+            {/* Bouton de connexion */}
+            <button className="login-button" onClick={() => navigate("/login")}>
+              {t("back", "Se connecter")} <span>→</span>
+            </button>
+          </div>
+        </header>
 
-        <div className="landing-content">
+        <div className="landing-content landing-hero">
           <div className="landing-logo-premium animate-fade-up">🛡️</div>
           
           <h1 className="premium-title animate-fade-up" style={{ animationDelay: "0.1s" }}>
@@ -297,11 +287,11 @@ export default function LandingPage() {
           {/* Feature badges */}
           <div className="premium-badge-container" style={{ animationDelay: "0.3s" }}>
             {[
-              { icon: "🔒", text: "Mode Kiosque" },
-              { icon: "💻", text: "Éditeur de Code" },
-              { icon: "📐", text: "UML" },
-              { icon: "📊", text: "Auto-correction" },
-              { icon: "🌐", text: "Offline/Online" },
+              { icon: "🔒", text: "Environnement Sécurisé" },
+              { icon: "💻", text: "Éditeur de Code en direct" },
+              { icon: "📐", text: "Génération d'UML" },
+              { icon: "📊", text: "Tableau de Bord Professeur" },
+              { icon: "🚀", text: "Performance Maximale" },
             ].map((f) => (
               <span key={f.text} className="premium-badge">
                 <span style={{ fontSize: "1.1rem" }}>{f.icon}</span>
@@ -310,35 +300,11 @@ export default function LandingPage() {
             ))}
           </div>
 
-          <div className="premium-cards-container animate-fade-up" style={{ animationDelay: "0.4s", marginTop: "40px" }}>
-            {/* Card Enseignant */}
-            <div
-              className="premium-card teacher"
-              onClick={() => navigate("/teacher/auth")}
-            >
-              <div className="premium-card-icon-wrapper">👨‍🏫</div>
-              <h2>{t("teacher")}</h2>
-              <p>{t("teacherDesc")}</p>
-              <div className="premium-card-btn">
-                {t("access")} <span>→</span>
-              </div>
-            </div>
+          <button className="hero-cta" onClick={() => navigate("/login")}>
+            Commencer maintenant
+          </button>
 
-            {/* Card Étudiant */}
-            <div
-              className="premium-card student"
-              onClick={() => navigate("/student/login")}
-            >
-              <div className="premium-card-icon-wrapper">🎓</div>
-              <h2>{t("student")}</h2>
-              <p>{t("studentDesc")}</p>
-              <div className="premium-card-btn">
-                {t("join")} <span>→</span>
-              </div>
-            </div>
-          </div>
-
-          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.85rem", marginTop: "80px", fontWeight: 500 }} className="animate-fade-up" style={{ animationDelay: "0.6s", marginTop: "80px" }}>
+          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.85rem", fontWeight: 500 }} className="animate-fade-up" style={{ animationDelay: "0.6s", marginTop: "80px" }}>
             © {new Date().getFullYear()} SAFECODE-EXAM • {t("university")}
           </p>
         </div>
