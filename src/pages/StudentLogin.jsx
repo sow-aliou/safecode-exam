@@ -334,6 +334,27 @@ export default function StudentLogin() {
             </button>
           </form>
 
+          {/* Règles de l'examen */}
+          <div style={{
+            marginTop: '24px',
+            padding: '16px',
+            background: 'rgba(239, 68, 68, 0.05)',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+            borderRadius: '12px',
+            fontSize: '0.85rem',
+            color: 'var(--text-secondary)',
+            lineHeight: '1.5'
+          }}>
+            <h4 style={{ color: '#f87171', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem' }}>
+              ⚠️ Règles strictes de l'examen
+            </h4>
+            <ul style={{ paddingLeft: '20px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <li>La plateforme passera automatiquement en mode <strong>plein écran</strong>.</li>
+              <li>Changer d'onglet, de fenêtre ou quitter le plein écran est <strong>strictement interdit</strong> et sera immédiatement signalé à votre professeur.</li>
+              <li>Toute tentative de triche peut entraîner l'<strong>exclusion de l'épreuve</strong>.</li>
+            </ul>
+          </div>
+
         </div>
       </div>
     </>

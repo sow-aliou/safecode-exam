@@ -321,8 +321,8 @@ export default function LandingPage() {
             SAFECODE-EXAM
           </h1>
           
-          <p className="premium-subtitle animate-fade-up" style={{ animationDelay: "0.2s" }}>
-            {t("landingTitle")}. {t("landingDesc")}
+          <p className="premium-subtitle animate-fade-up" style={{ animationDelay: "0.2s", maxWidth: "800px", fontSize: "1.2rem" }}>
+            SafeCode-Exam est la plateforme d'évaluation nouvelle génération conçue spécifiquement pour les universités et les écoles d'ingénieurs. Elle permet d'organiser des examens de programmation dans un environnement web hautement sécurisé, sans aucune installation requise. Évaluez vos étudiants sur du code pur et de la modélisation UML, avec une protection anti-triche intégrée.
           </p>
 
           {/* Feature badges */}
