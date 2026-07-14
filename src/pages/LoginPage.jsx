@@ -180,7 +180,7 @@ export default function LoginPage() {
         </button>
 
         <div className="login-content animate-fade-up">
-          <h1 className="login-title">{t("chooseSpace", "Choisissez votre espace")}</h1>
+          <h1 className="login-title">{t("chooseSpace")}</h1>
           
           <div className="premium-cards-container">
             {/* Card Enseignant */}

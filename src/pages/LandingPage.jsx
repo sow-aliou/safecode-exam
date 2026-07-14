@@ -309,7 +309,7 @@ export default function LandingPage() {
             </div>
             {/* Bouton de connexion */}
             <button className="login-button" onClick={() => navigate("/login")}>
-              {t("back", "Se connecter")} <span>→</span>
+              {t("loginBtn")} <span>→</span>
             </button>
           </div>
         </header>
