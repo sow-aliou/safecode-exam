@@ -230,6 +230,47 @@ const landingStyles = `
     transform: translateY(-4px) scale(1.02);
     box-shadow: 0 0 0 1px rgba(16,185,129,0.5), 0 20px 40px var(--accent-glow);
   }
+  
+  .how-it-works {
+    margin-top: 80px;
+    width: 100%;
+    max-width: 1000px;
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 0.6s ease forwards;
+    animation-delay: 0.6s;
+    opacity: 0;
+  }
+  .how-card {
+    flex: 1;
+    min-width: 320px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 24px;
+    padding: 30px 40px;
+    text-align: left;
+    backdrop-filter: blur(10px);
+    transition: transform 0.3s ease, background 0.3s ease;
+  }
+  .how-card:hover {
+    transform: translateY(-5px);
+    background: rgba(255,255,255,0.04);
+  }
+  .how-card h3 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .how-card p {
+    color: var(--text-secondary);
+    line-height: 1.7;
+    font-size: 1.05rem;
+  }
 `;
 
 export default function LandingPage() {
@@ -304,7 +345,23 @@ export default function LandingPage() {
             Commencer maintenant
           </button>
 
-          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.85rem", fontWeight: 500 }} className="animate-fade-up" style={{ animationDelay: "0.6s", marginTop: "80px" }}>
+          {/* Section Explicative */}
+          <div className="how-it-works">
+            <div className="how-card">
+              <h3>👨‍🏫 Côté Professeur</h3>
+              <p>
+                Créez rapidement vos sessions d'examen et importez votre liste d'étudiants (Excel/CSV). La plateforme génère <strong>automatiquement</strong> un code secret d'accès unique pour chaque élève. Vous pouvez ensuite surveiller les présences et les soumissions en temps réel depuis le tableau de bord.
+              </p>
+            </div>
+            <div className="how-card">
+              <h3>🎓 Côté Étudiant</h3>
+              <p>
+                Le jour de l'épreuve, connectez-vous avec votre <strong>matricule</strong> et le <strong>code secret</strong> fourni par le professeur. Rédigez votre code, dessinez vos diagrammes UML, et soumettez votre travail de manière cryptée et sécurisée avant la fin du temps imparti.
+              </p>
+            </div>
+          </div>
+
+          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.85rem", fontWeight: 500, marginTop: "80px" }} className="animate-fade-up">
             © {new Date().getFullYear()} SAFECODE-EXAM • {t("university")}
           </p>
         </div>
