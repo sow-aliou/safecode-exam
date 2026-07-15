@@ -19,7 +19,18 @@ export const translations = {
 
     // LandingPage
     landingTitle: "Plateforme d'examen sécurisée pour universités",
-    landingDesc: "Éditeur de code, modélisation UML et soumission cryptée dans un environnement verrouillé.",
+    landingDesc: "SafeCode-Exam est la plateforme d'évaluation nouvelle génération conçue spécifiquement pour les universités et les écoles d'ingénieurs. Elle permet d'organiser des examens de programmation dans un environnement web hautement sécurisé, sans aucune installation requise. Évaluez vos étudiants sur du code pur et de la modélisation UML, avec une protection anti-triche intégrée.",
+    badgeSecure: "Environnement Sécurisé",
+    badgeCode: "Éditeur de Code en direct",
+    badgeUml: "Génération d'UML",
+    badgeDashboard: "Tableau de Bord Professeur",
+    badgePerformance: "Performance Maximale",
+    startNowBtn: "Commencer maintenant",
+    howTeacherTitle: "Côté Professeur",
+    howTeacherDesc: "Créez rapidement vos sessions d'examen et importez votre liste d'étudiants (Excel/CSV). La plateforme génère automatiquement un code secret d'accès unique pour chaque élève. Vous pouvez ensuite surveiller les présences et les soumissions en temps réel depuis le tableau de bord.",
+    howStudentTitle: "Côté Étudiant",
+    howStudentDesc: "Le jour de l'épreuve, connectez-vous avec votre matricule et le code secret fourni par le professeur. Rédigez votre code, dessinez vos diagrammes UML, et soumettez votre travail de manière cryptée et sécurisée avant la fin du temps imparti.",
+    
     teacher: "Enseignant",
     teacherDesc: "Créez et gérez vos sessions d'examen, rédigiez les épreuves et consultez les copies soumises.",
     student: "Étudiant",
@@ -39,6 +50,10 @@ export const translations = {
     studentHelpText: "Vos accès individuels (Numéro Étudiant, Code Session et Code Secret) vous ont été envoyés par email.",
     fieldsRequired: "Veuillez remplir tous les champs.",
     authError: "Identifiants incorrects ou session introuvable.",
+    rulesTitle: "Règles strictes de l'examen",
+    rule1: "La plateforme passera automatiquement en mode plein écran.",
+    rule2: "Changer d'onglet, de fenêtre ou quitter le plein écran est strictement interdit et sera immédiatement signalé à votre professeur.",
+    rule3: "Toute tentative de triche peut entraîner l'exclusion de l'épreuve.",
 
     // TeacherAuth
     teacherTitle: "Espace Enseignant",
@@ -194,7 +209,18 @@ export const translations = {
 
     // LandingPage
     landingTitle: "Secure Exam Platform for Universities",
-    landingDesc: "Code editor, UML modeling, and encrypted submission in a locked environment.",
+    landingDesc: "SafeCode-Exam is the next-generation assessment platform designed specifically for universities and engineering schools. It allows you to organize programming exams in a highly secure web environment, requiring no installation. Evaluate your students on pure code and UML modeling, with built-in anti-cheat protection.",
+    badgeSecure: "Secure Environment",
+    badgeCode: "Live Code Editor",
+    badgeUml: "UML Generation",
+    badgeDashboard: "Teacher Dashboard",
+    badgePerformance: "Maximum Performance",
+    startNowBtn: "Start now",
+    howTeacherTitle: "Teacher Side",
+    howTeacherDesc: "Quickly create your exam sessions and import your student list (Excel/CSV). The platform automatically generates a unique secret access code for each student. You can then monitor attendance and submissions in real-time from the dashboard.",
+    howStudentTitle: "Student Side",
+    howStudentDesc: "On the day of the exam, log in with your student ID and the secret code provided by the teacher. Write your code, draw your UML diagrams, and submit your work encrypted and securely before the time is up.",
+    
     teacher: "Teacher",
     teacherDesc: "Create and manage exam sessions, write exam papers, and review submitted copies.",
     student: "Student",
@@ -209,11 +235,15 @@ export const translations = {
     matriculeLabel: "Student ID",
     examCodeLabel: "Exam Session Code",
     personalCodeLabel: "Personal Access Code (Email)",
-    launchBtn: "Launch Exam",
+    launchBtn: "Start Exam",
     verifying: "Verifying...",
-    studentHelpText: "Your individual access details have been sent to your university email. If missing, contact your teacher.",
+    studentHelpText: "Your individual credentials (Student ID, Session Code, and Secret Code) have been sent to you by email.",
     fieldsRequired: "Please fill in all fields.",
-    authError: "Incorrect credentials or session not found.",
+    authError: "Invalid credentials or session not found.",
+    rulesTitle: "Strict Exam Rules",
+    rule1: "The platform will automatically switch to full-screen mode.",
+    rule2: "Switching tabs, windows, or exiting full-screen is strictly forbidden and will be immediately reported to your teacher.",
+    rule3: "Any attempt to cheat may result in exclusion from the exam.",
 
     // TeacherAuth
     teacherTitle: "Teacher Portal",

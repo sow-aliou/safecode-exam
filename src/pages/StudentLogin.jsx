@@ -346,12 +346,12 @@ export default function StudentLogin() {
             lineHeight: '1.5'
           }}>
             <h4 style={{ color: '#f87171', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem' }}>
-              ⚠️ Règles strictes de l'examen
+              ⚠️ {t("rulesTitle")}
             </h4>
             <ul style={{ paddingLeft: '20px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <li>La plateforme passera automatiquement en mode <strong>plein écran</strong>.</li>
-              <li>Changer d'onglet, de fenêtre ou quitter le plein écran est <strong>strictement interdit</strong> et sera immédiatement signalé à votre professeur.</li>
-              <li>Toute tentative de triche peut entraîner l'<strong>exclusion de l'épreuve</strong>.</li>
+              <li dangerouslySetInnerHTML={{ __html: t("rule1").replace("plein écran", "<strong>plein écran</strong>").replace("full-screen", "<strong>full-screen</strong>") }}></li>
+              <li dangerouslySetInnerHTML={{ __html: t("rule2").replace("strictement interdit", "<strong>strictement interdit</strong>").replace("strictly forbidden", "<strong>strictly forbidden</strong>") }}></li>
+              <li dangerouslySetInnerHTML={{ __html: t("rule3").replace("exclusion de l'épreuve", "<strong>exclusion de l'épreuve</strong>").replace("exclusion from the exam", "<strong>exclusion from the exam</strong>") }}></li>
             </ul>
           </div>
 

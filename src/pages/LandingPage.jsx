@@ -322,17 +322,17 @@ export default function LandingPage() {
           </h1>
           
           <p className="premium-subtitle animate-fade-up" style={{ animationDelay: "0.2s", maxWidth: "800px", fontSize: "1.2rem" }}>
-            SafeCode-Exam est la plateforme d'évaluation nouvelle génération conçue spécifiquement pour les universités et les écoles d'ingénieurs. Elle permet d'organiser des examens de programmation dans un environnement web hautement sécurisé, sans aucune installation requise. Évaluez vos étudiants sur du code pur et de la modélisation UML, avec une protection anti-triche intégrée.
+            {t("landingDesc")}
           </p>
 
           {/* Feature badges */}
           <div className="premium-badge-container" style={{ animationDelay: "0.3s" }}>
             {[
-              { icon: "🔒", text: "Environnement Sécurisé" },
-              { icon: "💻", text: "Éditeur de Code en direct" },
-              { icon: "📐", text: "Génération d'UML" },
-              { icon: "📊", text: "Tableau de Bord Professeur" },
-              { icon: "🚀", text: "Performance Maximale" },
+              { icon: "🔒", text: t("badgeSecure") },
+              { icon: "💻", text: t("badgeCode") },
+              { icon: "📐", text: t("badgeUml") },
+              { icon: "📊", text: t("badgeDashboard") },
+              { icon: "🚀", text: t("badgePerformance") },
             ].map((f) => (
               <span key={f.text} className="premium-badge">
                 <span style={{ fontSize: "1.1rem" }}>{f.icon}</span>
@@ -342,22 +342,18 @@ export default function LandingPage() {
           </div>
 
           <button className="hero-cta" onClick={() => navigate("/login")}>
-            Commencer maintenant
+            {t("startNowBtn")}
           </button>
 
           {/* Section Explicative */}
           <div className="how-it-works">
             <div className="how-card">
-              <h3>👨‍🏫 Côté Professeur</h3>
-              <p>
-                Créez rapidement vos sessions d'examen et importez votre liste d'étudiants (Excel/CSV). La plateforme génère <strong>automatiquement</strong> un code secret d'accès unique pour chaque élève. Vous pouvez ensuite surveiller les présences et les soumissions en temps réel depuis le tableau de bord.
-              </p>
+              <h3>👨‍🏫 {t("howTeacherTitle")}</h3>
+              <p>{t("howTeacherDesc")}</p>
             </div>
             <div className="how-card">
-              <h3>🎓 Côté Étudiant</h3>
-              <p>
-                Le jour de l'épreuve, connectez-vous avec votre <strong>matricule</strong> et le <strong>code secret</strong> fourni par le professeur. Rédigez votre code, dessinez vos diagrammes UML, et soumettez votre travail de manière cryptée et sécurisée avant la fin du temps imparti.
-              </p>
+              <h3>🎓 {t("howStudentTitle")}</h3>
+              <p>{t("howStudentDesc")}</p>
             </div>
           </div>
 
