@@ -253,16 +253,28 @@ export default function TeacherDashboard() {
         const json = XLSX.utils.sheet_to_json(worksheet);
 
         const students = json.map(row => {
-          const matriculeKey = Object.keys(row).find(k => k.toLowerCase().includes('matricule')) || 'matricule';
-          const nomKey = Object.keys(row).find(k => k.toLowerCase().includes('nom')) || 'nom';
-          const prenomKey = Object.keys(row).find(k => k.toLowerCase().includes('prenom') || k.toLowerCase().includes('prénom')) || 'prenom';
-          const emailKey = Object.keys(row).find(k => k.toLowerCase().includes('mail') || k.toLowerCase().includes('email')) || 'email';
+          const keys = Object.keys(row);
+          const findKey = (keywords, exclude = []) => keys.find(k => {
+            const lower = k.toLowerCase();
+            return keywords.some(kw => lower.includes(kw)) && !exclude.some(ex => lower.includes(ex));
+          });
+
+          const matriculeKey = findKey(['matricule', 'id', 'num', 'student', 'code', 'identifiant']);
+          const prenomKey = findKey(['prenom', 'prénom', 'first', 'given']);
+          const nomKey = findKey(['nom', 'last', 'family', 'surname'], ['prenom', 'prénom']);
+          const emailKey = findKey(['mail', 'email', 'courriel', 'contact', 'adresse']);
+
+          // Fallback on index if not found (assuming Col1: ID, Col2: Last Name, Col3: First Name, Col4: Email)
+          const valMatricule = matriculeKey ? row[matriculeKey] : row[keys[0]];
+          const valNom = nomKey ? row[nomKey] : row[keys[1]];
+          const valPrenom = prenomKey ? row[prenomKey] : row[keys[2]];
+          const valEmail = emailKey ? row[emailKey] : row[keys[3]] || row[keys[2]] || row[keys[1]]; // Try to find something for email
 
           return {
-            matricule: String(row[matriculeKey] || '').trim().toUpperCase(),
-            nom: String(row[nomKey] || '').trim(),
-            prenom: String(row[prenomKey] || '').trim(),
-            email: String(row[emailKey] || '').trim(),
+            matricule: String(valMatricule || '').trim().toUpperCase(),
+            nom: String(valNom || '').trim(),
+            prenom: String(valPrenom || '').trim(),
+            email: String(valEmail || '').trim(),
             codeSecret: '', // Généré à l'envoi
             statusEmail: 'Prêt'
           };
