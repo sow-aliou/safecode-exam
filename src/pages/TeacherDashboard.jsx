@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { useTranslation } from '../utils/lang';
@@ -34,15 +34,26 @@ export default function TeacherDashboard() {
   const [importedStudents, setImportedStudents] = useState([]);
   const [isSendingEmails, setIsSendingEmails] = useState(false);
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setInternalError] = useState('');
+  const [success, setInternalSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const errorTimeoutRef = useRef(null);
+  const setError = (msg) => {
+    setInternalError(msg);
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    if (msg) {
+      errorTimeoutRef.current = setTimeout(() => setInternalError(''), 6000);
+    }
+  };
+
+  const successTimeoutRef = useRef(null);
   const showSuccessMessage = (msg) => {
-    setSuccess(msg);
-    setTimeout(() => {
-      setSuccess('');
-    }, 4000);
+    setInternalSuccess(msg);
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    if (msg) {
+      successTimeoutRef.current = setTimeout(() => setInternalSuccess(''), 4000);
+    }
   };
 
 
@@ -552,12 +563,24 @@ export default function TeacherDashboard() {
           </div>
         )}
         {error && (
-          <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius)', padding: '12px', color: '#f87171', marginBottom: 20 }}>
+          <div className="animate-fade-up" style={{ 
+            position: 'fixed', top: '80px', right: '20px', zIndex: 9999,
+            background: 'rgba(239,68,68,0.95)', border: '1px solid rgba(255,255,255,0.2)', 
+            borderRadius: 'var(--radius)', padding: '16px 20px', color: '#fff', 
+            boxShadow: '0 10px 40px rgba(239,68,68,0.3)', backdropFilter: 'blur(10px)',
+            maxWidth: '400px', fontWeight: 500
+          }}>
             ⚠️ {error}
           </div>
         )}
         {success && (
-          <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 'var(--radius)', padding: '12px', color: '#34d399', marginBottom: 20 }}>
+          <div className="animate-fade-up" style={{ 
+            position: 'fixed', top: '80px', right: '20px', zIndex: 9999,
+            background: 'rgba(16,185,129,0.95)', border: '1px solid rgba(255,255,255,0.2)', 
+            borderRadius: 'var(--radius)', padding: '16px 20px', color: '#fff', 
+            boxShadow: '0 10px 40px rgba(16,185,129,0.3)', backdropFilter: 'blur(10px)',
+            maxWidth: '400px', fontWeight: 500
+          }}>
             ✅ {success}
           </div>
         )}
