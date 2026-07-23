@@ -31,6 +31,7 @@ export default function TeacherDashboard() {
   const [filterStatus, setFilterStatus] = useState('all');
   
   const [newSession, setNewSession] = useState({ title: '', date: '', heureDebut: '', duree: 120, code: '' });
+  const [formError, setFormError] = useState('');
   const [importedStudents, setImportedStudents] = useState([]);
   const [isSendingEmails, setIsSendingEmails] = useState(false);
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
@@ -192,12 +193,19 @@ export default function TeacherDashboard() {
       duree: 120,
       code: generateCode()
     });
+    setFormError('');
     setShowNewModal(true);
   };
 
   const handleCreateSession = async (e) => {
     e.preventDefault();
-    setError('');
+    
+    if (!newSession.title.trim()) { setFormError(lang === 'fr' ? 'Veuillez donner un titre à la session.' : 'Please provide a session title.'); return; }
+    if (!newSession.date) { setFormError(lang === 'fr' ? 'La date de la session est obligatoire.' : 'The session date is required.'); return; }
+    if (!newSession.heureDebut) { setFormError(lang === 'fr' ? 'L\'heure de début est obligatoire.' : 'The start time is required.'); return; }
+    if (!newSession.duree || newSession.duree < 15) { setFormError(lang === 'fr' ? 'La durée doit être d\'au moins 15 minutes.' : 'The duration must be at least 15 minutes.'); return; }
+
+    setFormError('');
 
     const sessionData = {
       title: newSession.title,
@@ -899,24 +907,24 @@ export default function TeacherDashboard() {
             <form onSubmit={handleCreateSession} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div className="form-group">
                 <label className="form-label">{t('sessionTitleLabel')}</label>
-                <input className="form-input" placeholder="ex: Examen Final Java - S6" required
-                  value={newSession.title} onChange={e => setNewSession({...newSession, title: e.target.value})} />
+                <input className="form-input" placeholder="ex: Examen Final Java - S6"
+                  value={newSession.title} onChange={e => { setNewSession({...newSession, title: e.target.value}); setFormError(''); }} />
               </div>
               <div className="form-group">
                 <label className="form-label">{t('dateLabel')}</label>
-                <input className="form-input" type="date" required
-                  value={newSession.date} onChange={e => setNewSession({...newSession, date: e.target.value})} />
+                <input className="form-input" type="date"
+                  value={newSession.date} onChange={e => { setNewSession({...newSession, date: e.target.value}); setFormError(''); }} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">{t('startTimeLabel')}</label>
-                  <input className="form-input" type="time" required
-                    value={newSession.heureDebut} onChange={e => setNewSession({...newSession, heureDebut: e.target.value})} />
+                  <input className="form-input" type="time"
+                    value={newSession.heureDebut} onChange={e => { setNewSession({...newSession, heureDebut: e.target.value}); setFormError(''); }} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">{t('createExamDurationLabel') || 'Durée (minutes)'}</label>
-                  <input className="form-input" type="number" min="15" required
-                    value={newSession.duree} onChange={e => setNewSession({...newSession, duree: e.target.value})} />
+                  <input className="form-input" type="number" min="15"
+                    value={newSession.duree} onChange={e => { setNewSession({...newSession, duree: e.target.value}); setFormError(''); }} />
                 </div>
               </div>
               <div className="form-group">
@@ -924,6 +932,13 @@ export default function TeacherDashboard() {
                 <input className="form-input" readOnly value={newSession.code} 
                   style={{ fontFamily: 'Fira Code', textAlign: 'center', letterSpacing: '0.15em', fontWeight: 'bold' }} />
               </div>
+              
+              {formError && (
+                <div style={{ padding: '10px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: '#f87171', fontSize: '0.85rem', textAlign: 'center' }}>
+                  {formError}
+                </div>
+              )}
+
               <div className="modal-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowNewModal(false)}>{t('cancel')}</button>
                 <button type="submit" className="btn btn-primary">✨ {t('createBtn')}</button>

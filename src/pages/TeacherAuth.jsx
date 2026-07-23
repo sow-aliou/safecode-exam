@@ -189,11 +189,25 @@ export default function TeacherAuth() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.email || !form.motDePasse) { setError(t('fieldsRequired')); return; }
+    
+    // Validation
+    if (tab === 'register') {
+      if (!form.prenom.trim()) { setError(lang === 'fr' ? 'Le champ Prénom est obligatoire.' : 'First Name is required.'); return; }
+      if (!form.nom.trim()) { setError(lang === 'fr' ? 'Le champ Nom est obligatoire.' : 'Last Name is required.'); return; }
+      if (!form.email.trim()) { setError(lang === 'fr' ? 'Le champ Email est obligatoire.' : 'Email is required.'); return; }
+      if (!form.motDePasse.trim()) { setError(lang === 'fr' ? 'Le mot de passe est obligatoire.' : 'Password is required.'); return; }
+    } else {
+      if (!form.email.trim()) { setError(lang === 'fr' ? 'Veuillez saisir votre adresse email.' : 'Please enter your email.'); return; }
+      if (!form.motDePasse.trim()) { setError(lang === 'fr' ? 'Veuillez saisir votre mot de passe.' : 'Please enter your password.'); return; }
+    }
+
     setLoading(true); setError('');
     
     const endpoint = tab === 'login' ? '/api/teacher/login' : '/api/teacher/register';
